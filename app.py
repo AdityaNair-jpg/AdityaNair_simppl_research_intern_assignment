@@ -47,27 +47,28 @@ def load_data():
             for line in file:
                 try:
                     json_obj = json.loads(line)
-                    if "data" in json_obj:  # Check if "data" key exists
-                        data.append(json_obj["data"])  # Append the inner data
-                    else:
-                        data.append(json_obj)
+                    data.append(json_obj.get('data', json_obj))
                 except json.JSONDecodeError:
                     continue
         
         df = pd.DataFrame(data)
         
         # Convert timestamp to datetime if it exists
-        if 'created_at' in df.columns:
-            df['created_at'] = pd.to_datetime(df['created_at'])
-        elif 'timestamp' in df.columns:
-            df['created_at'] = pd.to_datetime(df['timestamp'])
-        elif 'created_utc' in df.columns:  # Add this based on your column list
-            df['created_at'] = pd.to_datetime(df['created_utc'])
-        elif 'created' in df.columns: # Added this based on your column list
-            df['created_at'] = pd.to_datetime(df['created'])
+        # Convert timestamp (prioritize specific columns)
+        timestamp_cols = ['created_at', 'timestamp', 'created_utc', 'created']
+        for col in timestamp_cols:
+            if col in df.columns:
+                try:
+                    df['created_at'] = pd.to_datetime(df[col], errors='coerce')  # Handle parsing errors
+                    break  # Stop after finding the first valid column
+                except ValueError:
+                    print(f"Could not convert '{col}' to datetime. Trying others.")
+            if 'created_at' not in df.columns:
+                print("Warning: No valid timestamp column found.")
+                df['created_at'] = None  # Create an empty column to prevent errors later
         
         # Extract text content
-        text_columns = ['text', 'content', 'body', 'message']
+        text_columns = ['text', 'content', 'body', 'message', 'selftext', 'title', 'subreddit', 'subreddit_name_prefixed', 'upvote_ratio', 'subreddit_type', 'ups', 'total_awards_received','score', 'domain']
         for col in text_columns:
             if col in df.columns:
                 df['content'] = df[col]

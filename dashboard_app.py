@@ -55,12 +55,16 @@ def load_data():
     
     # Convert timestamp to datetime if it exists
     if 'created_at' in df.columns:
-        df['created_at'] = pd.to_datetime(df['created_at'])
+            df['created_at'] = pd.to_datetime(df['created_at'])
     elif 'timestamp' in df.columns:
-        df['created_at'] = pd.to_datetime(df['timestamp'])
-    
+            df['created_at'] = pd.to_datetime(df['timestamp'])
+    elif 'created_utc' in df.columns:  # Add this based on your column list
+            df['created_at'] = pd.to_datetime(df['created_utc'])
+    elif 'created' in df.columns: # Added this based on your column list
+            df['created_at'] = pd.to_datetime(df['created'])
+        
     # Extract text content
-    text_columns = ['text', 'content', 'body', 'message']
+    text_columns = ['text', 'content', 'body', 'message', 'selftext', 'title', 'subreddit', 'subreddit_name_prefixed', 'upvote_ratio', 'subreddit_type', 'ups', 'total_awards_received','score', 'domain']
     for col in text_columns:
         if col in df.columns:
             df['content'] = df[col]
