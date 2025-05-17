@@ -41,52 +41,80 @@ download_nltk_resources()
 # Load data
 @st.cache_data
 def load_data():
-    try:
-        data = []
-        with open('data.jsonl', 'r', encoding='utf-8') as file:
-            for line in file:
-                try:
-                    json_obj = json.loads(line)
-                    data.append(json_obj.get('data', json_obj))
-                except json.JSONDecodeError:
-                    continue
-        
-        df = pd.DataFrame(data)
-        
-        # Convert timestamp to datetime if it exists
-        # Convert timestamp (prioritize specific columns)
-        timestamp_cols = ['created_at', 'timestamp', 'created_utc', 'created']
-        for col in timestamp_cols:
-            if col in df.columns:
-                try:
-                    df['created_at'] = pd.to_datetime(df[col], errors='coerce')  # Handle parsing errors
-                    break  # Stop after finding the first valid column
-                except ValueError:
-                    print(f"Could not convert '{col}' to datetime. Trying others.")
-            if 'created_at' not in df.columns:
-                print("Warning: No valid timestamp column found.")
-                df['created_at'] = None  # Create an empty column to prevent errors later
-        
-        # Extract text content
-        text_columns = ['text', 'content', 'body', 'message', 'selftext', 'title', 'subreddit', 'subreddit_name_prefixed', 'upvote_ratio', 'subreddit_type', 'ups', 'total_awards_received','score', 'domain']
-        for col in text_columns:
-            if col in df.columns:
-                df['content'] = df[col]
-                break
-        
-        # Extract user information
-        user_cols = ['user_id', 'author', 'username', 'user.screen_name']
-        for col in user_cols:
-            if col in df.columns:
-                df['user_id'] = df[col]
-                break
-        
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        # Return empty DataFrame with expected columns to prevent errors
-        return pd.DataFrame(columns=['created_at', 'content', 'user_id'])
+    data = []
+    with open('data.jsonl', 'r', encoding='utf-8') as file:
+        for line in file:
+            try:
+                json_obj = json.loads(line)
+                # Safely extract data, handling missing 'data' key
+                data.append(json_obj.get('data', json_obj))
+            except json.JSONDecodeError:
+                print(f"Skipping invalid JSON line: {line.strip()}")  # Log invalid lines
+                continue
+    df = pd.DataFrame(data)
 
+    # Debug: Print initial column data types
+    print("\n--- Initial DataFrame Info ---")
+    df.info()
+    print("\n--- Initial DataFrame Head ---")
+    print(df.head())
+
+    # Convert timestamp (prioritize specific columns)
+    timestamp_cols = ['created_utc', 'created', 'timestamp', 'created_at', 'date', 'datetime', 'post_timestamp']
+    df['created_at'] = pd.NaT  # Initialize with NaT (Not a Time)
+
+    for col in timestamp_cols:
+        if col in df.columns:
+            print(f"\nAttempting to convert column '{col}' to datetime...")
+            try:
+                # Try parsing as Unix timestamp first
+                df['created_at'] = pd.to_datetime(df[col], unit='s', errors='coerce')
+                if df['created_at'].notna().any():
+                    print(f"Successfully converted '{col}' from Unix timestamp.")
+                    break  # Stop if successful
+                else:
+                    print(f"Column '{col}' conversion from Unix timestamp resulted in all NaT. Trying default parsing.")
+                    # If Unix conversion fails, try default parsing
+                    df['created_at'] = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
+                    if df['created_at'].notna().any():
+                        print(f"Successfully converted '{col}' using default parsing.")
+                        break
+                    else:
+                        print(f"Column '{col}' conversion from default parsing also resulted in all NaT.")
+            except ValueError as e:
+                print(f"Error converting '{col}' to datetime: {e}")
+
+    if 'created_at' not in df.columns or not df['created_at'].notna().any():
+        print("Warning: No valid timestamp column found. Creating empty 'created_at' column.")
+        df['created_at'] = pd.to_datetime(pd.Series())  # Create empty datetime series
+
+    # Debug: Print DataFrame info after timestamp conversion
+    print("\n--- DataFrame Info After Timestamp Conversion ---")
+    df.info()
+    print("\n--- DataFrame Head After Timestamp Conversion ---")
+    print(df.head())
+
+    # Extract text content (prioritize 'selftext', 'title', 'content')
+    text_cols = ['selftext', 'title', 'content', 'text', 'body', 'message']
+    df['content'] = None  # Initialize 'content' column
+    for col in text_cols:
+        if col in df.columns:
+            df['content'] = df[col].astype(str)  # Ensure string type
+            break
+    if 'content' not in df.columns:
+        print("Warning: No valid text column found.")
+
+    # Extract user information
+    user_cols = ['user_id', 'author', 'username', 'user.screen_name']
+    df['user_id'] = None  # Initialize 'user_id'
+    for col in user_cols:
+        if col in df.columns:
+            df['user_id'] = df[col].astype(str)
+            break
+    if 'user_id' not in df.columns:
+        print("Warning: No valid user ID column found.")
+
+    return df
 # Function to generate a wordcloud
 def generate_wordcloud(text_data):
     text = " ".join(text_data.dropna().astype(str))
