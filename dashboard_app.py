@@ -94,7 +94,7 @@ def load_data():
     print(df.head())
 
     # Extract text content (prioritize 'selftext', 'title', 'content')
-    text_cols = ['selftext', 'title', 'content', 'text', 'body', 'message']
+    text_cols = ['selftext', 'title', 'content', 'text', 'body', 'message', 'subreddit']
     df['content'] = None  # Initialize 'content' column
     for col in text_cols:
         if col in df.columns:
