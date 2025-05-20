@@ -9,6 +9,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
 import nltk
+nltk.download('vader_lexicon')
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from collections import Counter
@@ -52,7 +54,7 @@ def load_data():
                 try:
                     json_obj = json.loads(line)
                     # Safely extract data, handling missing 'data' key
-                    data.append(json_obj.get('data', json_obj))
+                    data.append(json_obj.get('data', json_obj.get('data', json_obj)))
                 except json.JSONDecodeError:
                     print(f"Skipping invalid JSON line: {line.strip()}")  # Log invalid lines
                     continue
@@ -135,6 +137,32 @@ def load_data():
     return df
 
 
+# Function to process the DataFrame (this is NOT cached)
+def process_data(df, search_term="", date_range=None):
+    filtered_df = df.copy()  # Work on a copy to avoid modifying the original
+
+    # Date filtering
+    if 'created_at' in filtered_df.columns and date_range:
+        start_date, end_date = date_range
+        filtered_df = filtered_df[
+            (filtered_df['created_at'].dt.date >= start_date) &
+            (filtered_df['created_at'].dt.date <= end_date)
+        ]
+
+    # Search filtering
+    if search_term and 'content' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df['content'].str.contains(
+            search_term, case=False, na=False)]
+
+    # Sentiment Analysis
+    if 'content' in filtered_df.columns:
+        filtered_df['sentiment'] = filtered_df['content'].fillna("").apply(analyze_sentiment)
+    else:
+        filtered_df['sentiment'] = 'neutral'  # Or appropriate default
+
+    return filtered_df
+
+
 # Function to generate a wordcloud
 def generate_wordcloud(text_data):
     text = " ".join(text_data.dropna().astype(str))
@@ -168,6 +196,22 @@ def preprocess_text(text_series):
             processed_texts.append("")
 
     return processed_texts
+
+# Function to analyze sentiment using VADER
+sia = SentimentIntensityAnalyzer()
+def analyze_sentiment(text):
+    
+    if not isinstance(text, str) or text.strip() == "":
+        return "neutral"
+    score = sia.polarity_scores(text)
+    compound = score['compound']
+    if compound >= 0.05:
+        return 'positive'
+    elif compound <= -0.05:
+        return 'negative'
+    else:
+        return 'neutral'
+
 
 
 # Function to extract topics using NMF
@@ -377,7 +421,14 @@ def main():
                 f"Found {len(filtered_df)} posts containing '{search_term}'")
         else:
             st.sidebar.warning("Content column not found for search.")
-
+    # Add sentiment column if not already present
+    
+    with st.spinner("Analyzing sentiment..."):
+            filtered_df['sentiment'] = filtered_df['content'].fillna("").apply(analyze_sentiment)
+    
+     # Debug: Inspect the DataFrame
+    st.subheader("Debug: DataFrame with Sentiment")
+    st.dataframe(filtered_df)
     # Main dashboard content
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["Time Series Analysis", "Content Analysis",
@@ -439,6 +490,19 @@ def main():
             fig_bar = px.bar(most_common, x='word', y='count',
                               title='Top 20 Most Frequent Words')
             st.plotly_chart(fig_bar, use_container_width=True)
+
+            # Sentiment Pie Chart
+            st.subheader("Sentiment Distribution")
+            sc = filtered_df['sentiment'].value_counts().reset_index()
+            sc.columns = ['sentiment', 'count']
+            st.write("Debug: sentiment_counts DataFrame", sc)
+
+            fig_sentiment = px.pie(sc,
+                               names='sentiment',
+                               values='count',
+                               title='Post Sentiment Breakdown')
+            st.plotly_chart(fig_sentiment, use_container_width=True)
+
         else:
             st.warning("No content available for analysis.")
 
@@ -499,3 +563,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
