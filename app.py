@@ -491,17 +491,44 @@ def main():
                               title='Top 20 Most Frequent Words')
             st.plotly_chart(fig_bar, use_container_width=True)
 
-            # Sentiment Pie Chart
+## Sentiment Pie Chart
             st.subheader("Sentiment Distribution")
-            sc = filtered_df['sentiment'].value_counts().reset_index()
-            sc.columns = ['sentiment', 'count']
-            st.write("Debug: sentiment_counts DataFrame", sc)
 
-            fig_sentiment = px.pie(sc,
-                               names='sentiment',
-                               values='count',
-                               title='Post Sentiment Breakdown')
-            st.plotly_chart(fig_sentiment, use_container_width=True)
+            # Get value counts directly, which are already numeric
+            sentiment_counts = filtered_df['sentiment'].value_counts().reset_index()
+            sentiment_counts.columns = ['sentiment', 'counts'] # Rename columns for clarity
+
+            # Debug: Verify the DataFrame before plotting (keep these lines for verification)
+            st.write("Debug: Sentiment counts DataFrame before plotting", sentiment_counts)
+            st.write("Data types in sentiment_counts:", sentiment_counts.dtypes)
+
+            if 'sentiment' in filtered_df.columns and not filtered_df['sentiment'].empty and not sentiment_counts.empty:
+                # --- NEW CODE: Using plotly.graph_objects.Figure and go.Pie ---
+                fig_sentiment = go.Figure(data=[go.Pie(
+                    labels=sentiment_counts['sentiment'],
+                    values=sentiment_counts['counts'],
+                    hole=.3 # Optional: makes it a donut chart
+                )])
+                fig_sentiment.update_layout(title_text='Post Sentiment Breakdown')
+                # --- END NEW CODE ---
+
+                st.plotly_chart(fig_sentiment, use_container_width=True)
+            else:
+                st.warning("No sentiment data available to plot.")
+
+            if 'sentiment' in filtered_df.columns and not filtered_df['sentiment'].empty:
+                # 🎯 Plot the cleaned data
+                fig_sentiment = px.pie(
+                    sentiment_counts,
+                    names='sentiment',
+                    values='counts',
+                    title='Post Sentiment Breakdown'
+                )
+                st.plotly_chart(fig_sentiment, use_container_width=True)
+            else:
+                st.warning("No sentiment data available to plot.")
+
+
 
         else:
             st.warning("No content available for analysis.")
