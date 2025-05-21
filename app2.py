@@ -257,14 +257,6 @@ def create_plotly_network_graph(df_for_graph):
         subreddit_node_id = f"r/{subreddit}" # Example: r/politics
         G.add_node(subreddit_node_id, type='subreddit')
 
-    # --- DEBUG: Initial Node Counts ---
-    st.write(f"DEBUG: Number of unique authors found in data: {len(all_authors)}")
-    st.write(f"DEBUG: Number of unique subreddits found in data: {len(all_subreddits)}")
-    st.write(f"DEBUG: Number of nodes in graph G after initial creation (before edges): {G.number_of_nodes()}")
-    st.write(f"DEBUG: Number of author nodes in G (before edges): {len([n for n, data in G.nodes(data=True) if data.get('type') == 'author'])}")
-    st.write(f"DEBUG: Number of subreddit nodes in G (before edges): {len([n for n, data in G.nodes(data=True) if data.get('type') == 'subreddit'])}")
-
-
     # Add edges: Author to Subreddit (posts in), Author to Author (mentions)
     for _, row in df_for_graph.iterrows():
         author = str(row['author']).strip()
@@ -288,20 +280,11 @@ def create_plotly_network_graph(df_for_graph):
     # Remove self-loops (authors mentioning themselves, etc.)
     G.remove_edges_from(nx.selfloop_edges(G))
 
-    # --- DEBUG: Graph G after adding edges ---
-    st.write(f"DEBUG: Number of nodes in graph G after adding edges: {G.number_of_nodes()}")
-    st.write(f"DEBUG: Number of edges in graph G: {G.number_of_edges()}")
-    st.write(f"DEBUG: Number of author nodes in G (after edges): {len([n for n, data in G.nodes(data=True) if data.get('type') == 'author'])}")
-
-
     if not G.nodes():
         st.warning("No interactions or valid authors/subreddits to display for the selected filters.")
         return None
-    
     """
     # --- Handle large graphs for better visualization performance ---
-    # This block is TEMPORARILY COMMENTED OUT for debugging purposes.
-    # It will be re-enabled or modified later.
     if G.number_of_nodes() > 500: # Adjust this limit as needed
         st.info(f"The network graph has {G.number_of_nodes()} nodes. Displaying the largest connected component (or a sample) for better performance.")
         components = list(nx.connected_components(G))
@@ -311,19 +294,19 @@ def create_plotly_network_graph(df_for_graph):
             
             if G.number_of_nodes() > 500: # If largest component is still too big, sample
                 st.info(f"Largest component ({G.number_of_nodes()} nodes) is still too large. Randomly sampling 500 nodes.")
+                # Simple random sample might lose structure. Consider more advanced sampling for very large graphs.
                 sampled_nodes = random.sample(list(G.nodes()), 500)
                 G = G.subgraph(sampled_nodes).copy()
         else:
             st.warning("No connected components found in the graph. Graph might be too sparse.")
             return None
-    """
-    
+      """      
     if G.number_of_nodes() == 0:
-        st.warning("No connections found after processing for the network graph.")
+        st.warning("No connections found after sampling/filtering for the network graph.")
         return None
 
     # Compute positions for nodes
-    pos = nx.spring_layout(G, k=0.15, iterations=50, seed=42)
+    pos = nx.spring_layout(G, k=0.15, iterations=50, seed=42) # k adjusts optimal distance between nodes
 
     # Prepare lists for Plotly traces, separating authors and subreddits
     author_node_x, author_node_y, author_node_text, author_node_degrees = [], [], [], []
@@ -346,47 +329,18 @@ def create_plotly_network_graph(df_for_graph):
         elif node_type == 'subreddit':
             subreddit_node_x.append(x)
             subreddit_node_y.append(y)
+            # Size subreddit nodes based on their degree (number of authors/mentions linked to them)
             subreddit_degree = G.degree[node]
+            # Max size for subreddit nodes to stand out
             subreddit_node_sizes.append(max(15, subreddit_degree * 4 + 15)) 
             subreddit_node_text.append(f"Subreddit: {node.replace('r/', '')}<br>Connections: {subreddit_degree}")
-
-    # --- DEBUG: Plotting Data Lists ---
-    st.write(f"DEBUG: Length of author_node_x: {len(author_node_x)}")
-    st.write(f"DEBUG: Length of author_node_degrees: {len(author_node_degrees)}")
-    if author_node_degrees:
-        st.write(f"DEBUG: Sample author degrees (first 10): {author_node_degrees[:min(10, len(author_node_degrees))]}")
-    else:
-        st.write("DEBUG: author_node_degrees is empty.")
-    
-    # Calculate author_node_sizes_scaled here to ensure it's debugged
-    if author_node_degrees:
-        max_author_degree = max(author_node_degrees)
-    else:
-        max_author_degree = 1 # Default to 1 to prevent division by zero
-
-    author_node_sizes_scaled = [max(8, (d / max_author_degree) * 20 + 8) for d in author_node_degrees]
-
-    st.write(f"DEBUG: Length of author_node_sizes_scaled: {len(author_node_sizes_scaled)}")
-    if author_node_sizes_scaled:
-        st.write(f"DEBUG: Sample author sizes (first 10): {author_node_sizes_scaled[:min(10, len(author_node_sizes_scaled))]}")
-    else:
-        st.write("DEBUG: author_node_sizes_scaled is empty.")
-
-    if author_node_x:
-        st.write(f"DEBUG: Sample author_node_x (first 10): {author_node_x[:min(10, len(author_node_x))]}")
-        st.write(f"DEBUG: Sample author_node_y (first 10): {author_node_y[:min(10, len(author_node_y))]}")
-    else:
-        st.write("DEBUG: author_node_x is empty.")
-
-    st.write(f"DEBUG: Length of subreddit_node_x: {len(subreddit_node_x)}")
-    st.write(f"DEBUG: Length of subreddit_node_sizes: {len(subreddit_node_sizes)}")
 
     for edge in G.edges():
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
         edge_x.append(x0)
         edge_x.append(x1)
-        edge_x.append(None) 
+        edge_x.append(None) # Separator for lines in Plotly
         edge_y.append(y0)
         edge_y.append(y1)
         edge_y.append(None)
@@ -402,17 +356,26 @@ def create_plotly_network_graph(df_for_graph):
     )
 
     # Author Nodes Trace
+    # Scale author node size based on their degree for visual emphasis
+    if author_node_degrees:
+        max_author_degree = max(author_node_degrees) 
+    else:
+        max_author_degree = 1 # Avoid division by zero
+
+    # Scale author node sizes
+    author_node_sizes_scaled = [max(8, (d / max_author_degree) * 20 + 8) for d in author_node_degrees] 
+    
     author_node_trace = go.Scatter(
         x=author_node_x, y=author_node_y,
         mode='markers',
         hoverinfo='text',
         text=author_node_text,
         marker=dict(
-            showscale=True, 
-            colorscale='YlGnBu', 
+            showscale=True, # Show color scale for author nodes
+            colorscale='YlGnBu', # Yellow-Green-Blue color scale
             reversescale=True,
-            color=author_node_degrees, 
-            size=author_node_sizes_scaled, 
+            color=author_node_degrees, # Color authors by their number of connections
+            size=author_node_sizes_scaled, # Scaled size
             colorbar=dict(
                 thickness=15,
                 title=dict(
@@ -424,7 +387,7 @@ def create_plotly_network_graph(df_for_graph):
             line_width=2,
             line_color='darkblue'
         ),
-        name='Authors' 
+        name='Authors' # Name for the legend
     )
 
     # Subreddit Nodes Trace
@@ -434,24 +397,24 @@ def create_plotly_network_graph(df_for_graph):
         hoverinfo='text',
         text=subreddit_node_text,
         marker=dict(
-            color='rgb(255, 100, 100)', 
-            size=subreddit_node_sizes, 
-            symbol='square', 
+            color='rgb(255, 100, 100)', # Distinct color for subreddits (a vibrant red)
+            size=subreddit_node_sizes, # Size based on subreddit's degree
+            symbol='square', # Use a square shape for subreddits
             line_width=1,
             line_color='black'
         ),
-        name='Subreddits' 
+        name='Subreddits' # Name for the legend
     )
 
     # Create the Plotly figure
     fig = go.Figure(
-        data=[edge_trace, author_node_trace, subreddit_node_trace], 
+        data=[edge_trace, author_node_trace, subreddit_node_trace], # Include all three traces
         layout=go.Layout(
             title=dict(
                 text='Author-Subreddit-Mention Network',
-                font_size=20 
+                font_size=20 # Slightly larger title font
             ),
-            showlegend=True, 
+            showlegend=True, # Show legend to distinguish node types
             hovermode='closest',
             margin=dict(b=20, l=5, r=5, t=40),
             annotations=[

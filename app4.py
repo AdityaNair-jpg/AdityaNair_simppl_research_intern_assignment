@@ -451,7 +451,10 @@ def main():
                 x='created_at',
                 y='Post Count',
                 title='Number of Posts Over Time',
-                labels={'created_at': 'Date', 'Post Count': 'Number of Posts'}
+                labels={'created_at': 'Date', 'Post Count': 'Number of Posts'},
+                markers=True, # Added markers
+                line_shape='spline', # Added spline interpolation
+                hover_data={'created_at': '|%Y-%m-%d', 'Post Count': True} # Show date and count on hover
             )
             st.plotly_chart(fig_activity, use_container_width=True)
         else:
@@ -496,7 +499,10 @@ def main():
                     x='created_at',
                     y='sentiment_numeric_score',
                     title='Average Sentiment Over Time (NLTK VADER)', # Updated title
-                    labels={'created_at': 'Date', 'sentiment_numeric_score': 'Average Sentiment Score'}
+                    labels={'created_at': 'Date', 'sentiment_numeric_score': 'Average Sentiment Score'},
+                    markers=True, # Added markers
+                    line_shape='spline', # Added spline interpolation
+                    hover_data={'created_at': '|%Y-%m-%d', 'sentiment_numeric_score': ':.2f'} # Show date and score on hover
                 )
                 st.plotly_chart(fig_time, use_container_width=True)
             else:
