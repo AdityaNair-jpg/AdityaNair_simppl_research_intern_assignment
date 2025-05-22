@@ -37,13 +37,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-## --- CORRECTED NLTK DOWNLOAD & INITIALIZATION BLOCK ---
+# --- REVISED NLTK DOWNLOAD & INITIALIZATION BLOCK ---
 @st.cache_resource
 def setup_nltk_resources():
     """
-    Downloads necessary NLTK data and initializes the sentiment analyzer.
+    Downloads necessary NLTK data and initializes the sentiment analyzer and stopwords.
     This function uses st.cache_resource to ensure it runs only once per app session.
     """
+    # Download NLTK data if not already present
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
     except nltk.downloader.DownloadError:
@@ -57,12 +58,14 @@ def setup_nltk_resources():
     except nltk.downloader.DownloadError:
         nltk.download('punkt', quiet=True)
 
+    # Initialize sentiment analyzer
     analyzer = SentimentIntensityAnalyzer()
-    stop_words_set = set(stopwords.words('english')) # NOW SAFE TO CALL HERE
+    # Initialize stopwords AFTER ensuring they are downloaded
+    stop_words_set = set(stopwords.words('english'))
+    
     return analyzer, stop_words_set
 
-# Call the cached function once at the top level to get the analyzer and stopwords
-# This ensures they are downloaded and available before any other code tries to use them.
+# Call the cached function once at the very beginning to get the analyzer and stopwords
 sentiment_analyzer, stop_words_nltk = setup_nltk_resources()
 
 # Import Network for pyvis (keep this here, it's fine)
@@ -71,7 +74,8 @@ try:
 except ImportError:
     st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
     Network = None # Set to None if not available
-# --- END CORRECTED NLTK BLOCK ---
+# --- END REVISED NLTK BLOCK ---
+
 
 # Preprocessing for topic modeling and word cloud
 @st.cache_data
