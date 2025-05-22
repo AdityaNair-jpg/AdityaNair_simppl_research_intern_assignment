@@ -45,38 +45,6 @@ st.set_page_config(
 )
 # Download NLTK resources and Load VADER model on startup
 @st.cache_resource
-def load_nltk_resources_and_model():
-    """
-    Downloads necessary NLTK data and initializes the sentiment analyzer.
-    This function uses st.cache_resource to ensure it runs only once per app session.
-    """
-    try:
-        nltk.data.find('sentiment/vader_lexicon.zip')
-    except nltk.downloader.DownloadError:
-        nltk.download('vader_lexicon', quiet=True)
-    try:
-        nltk.data.find('corpora/stopwords.zip')
-    except nltk.downloader.DownloadError:
-        nltk.download('stopwords', quiet=True)
-    try:
-        nltk.data.find('tokenizers/punkt.zip')
-    except nltk.downloader.DownloadError:
-        nltk.download('punkt', quiet=True)
-
-    analyzer = SentimentIntensityAnalyzer()
-    stop_words_set = set(stopwords.words('english')) # Now safe to call after download
-    return analyzer, stop_words_set
-sentiment_analyzer, stop_words_nltk = load_nltk_resources_and_model()
-
-# Import Network for pyvis (keep this here, it's fine)
-try:
-    from pyvis.network import Network
-except ImportError:
-    st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
-    Network = None # Set to None if not available
-# --- END CORRECTED BLOCK ---
-
-@st.cache_resource
 def load_nltk_resources():
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
