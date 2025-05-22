@@ -1,5 +1,2 @@
 [server]
-# Use Python 3.10
-# Or choose another version like '3.9' if 3.10 also causes issues
-# You can check available versions in Streamlit Cloud's documentation
 pythonVersion = "3.10"
