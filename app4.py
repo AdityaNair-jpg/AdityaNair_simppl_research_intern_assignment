@@ -45,17 +45,18 @@ def setup_nltk_resources():
     This function uses st.cache_resource to ensure it runs only once per app session.
     """
     # Download NLTK data if not already present
+    # Changed from nltk.downloader.DownloadError to a more general Exception
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
-    except nltk.downloader.DownloadError:
+    except (LookupError, Exception): # Catch LookupError specifically, or general Exception
         nltk.download('vader_lexicon', quiet=True)
     try:
         nltk.data.find('corpora/stopwords.zip')
-    except nltk.downloader.DownloadError:
+    except (LookupError, Exception): # Catch LookupError specifically, or general Exception
         nltk.download('stopwords', quiet=True)
     try:
         nltk.data.find('tokenizers/punkt.zip')
-    except nltk.downloader.DownloadError:
+    except (LookupError, Exception): # Catch LookupError specifically, or general Exception
         nltk.download('punkt', quiet=True)
 
     # Initialize sentiment analyzer
@@ -75,6 +76,7 @@ except ImportError:
     st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
     Network = None # Set to None if not available
 # --- END REVISED NLTK BLOCK ---
+
 
 
 # Preprocessing for topic modeling and word cloud
