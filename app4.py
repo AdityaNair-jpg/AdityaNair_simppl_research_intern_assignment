@@ -27,12 +27,6 @@ import altair as alt
 # Import AI-related functions from the new file
 from ai_insights import generate_enhanced_insights, generate_mock_insights
 
-# Import Network for pyvis
-try:
-    from pyvis.network import Network
-except ImportError:
-    st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
-    Network = None # Set to None if not available
 
 warnings.filterwarnings('ignore')
 
@@ -43,9 +37,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-# Download NLTK resources and Load VADER model on startup
+## --- CORRECTED NLTK DOWNLOAD & INITIALIZATION BLOCK ---
 @st.cache_resource
-def load_nltk_resources():
+def setup_nltk_resources():
+    """
+    Downloads necessary NLTK data and initializes the sentiment analyzer.
+    This function uses st.cache_resource to ensure it runs only once per app session.
+    """
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
     except nltk.downloader.DownloadError:
@@ -58,19 +56,22 @@ def load_nltk_resources():
         nltk.data.find('tokenizers/punkt.zip')
     except nltk.downloader.DownloadError:
         nltk.download('punkt', quiet=True)
-    return SentimentIntensityAnalyzer()
 
-sid = load_nltk_resources() # Call this to ensure downloads happen
-# Download NLTK resources and Load VADER model on startup
-@st.cache_resource
-def load_sentiment_model_and_nltk_resources():
-    nltk.download('punkt')
-    nltk.download('stopwords')
-    nltk.download('vader_lexicon') # Ensure VADER lexicon is downloaded
-    analyzer = SentimentIntensityAnalyzer() # Initialize VADER
-    return analyzer # Return the VADER analyzer
+    analyzer = SentimentIntensityAnalyzer()
+    stop_words_set = set(stopwords.words('english')) # NOW SAFE TO CALL HERE
+    return analyzer, stop_words_set
 
-sentiment_analyzer = load_sentiment_model_and_nltk_resources() # Renamed from sentiment_model to sentiment_analyzer for clarity
+# Call the cached function once at the top level to get the analyzer and stopwords
+# This ensures they are downloaded and available before any other code tries to use them.
+sentiment_analyzer, stop_words_nltk = setup_nltk_resources()
+
+# Import Network for pyvis (keep this here, it's fine)
+try:
+    from pyvis.network import Network
+except ImportError:
+    st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
+    Network = None # Set to None if not available
+# --- END CORRECTED NLTK BLOCK ---
 
 # Preprocessing for topic modeling and word cloud
 @st.cache_data
