@@ -22,6 +22,11 @@ import re
 import os
 import random
 import warnings
+import plotly.graph_objects as go
+import altair as alt
+# Import AI-related functions from the new file
+from ai_insights import generate_enhanced_insights, generate_mock_insights
+
 # Import Network for pyvis
 try:
     from pyvis.network import Network
@@ -39,19 +44,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
-# Download NLTK resources on startup
+# Download NLTK resources and Load VADER model on startup
 @st.cache_resource
-def download_nltk_resources():
+def load_sentiment_model_and_nltk_resources():
     nltk.download('punkt')
     nltk.download('stopwords')
     nltk.download('vader_lexicon') # Ensure VADER lexicon is downloaded
-    return SentimentIntensityAnalyzer() # Cache the analyzer itself
+    st.write("DEBUG: Loading NLTK VADER sentiment analyzer...")
+    analyzer = SentimentIntensityAnalyzer() # Initialize VADER
+    st.write("DEBUG: NLTK VADER sentiment analyzer loaded.")
+    return analyzer # Return the VADER analyzer
 
-# Initialize SIA globally using the cached resource
-sid = download_nltk_resources()
+sentiment_analyzer = load_sentiment_model_and_nltk_resources() # Renamed from sentiment_model to sentiment_analyzer for clarity
 
-# Preprocessing for sentiment analysis and topic modeling
+# Preprocessing for topic modeling and word cloud
 @st.cache_data
 def preprocess_text(text_series):
     # Ensure all elements are strings before lowercasing
@@ -65,53 +71,147 @@ def preprocess_text(text_series):
     tokens = tokens.apply(lambda x: [word for word in x if word.isalpha() and word not in stop_words])
     return tokens
 
-# Topic Modeling
+# Enhanced Topic Modeling with more detailed output
 @st.cache_data
-def extract_topics(processed_texts, n_topics=5):
+def extract_topics_enhanced(processed_texts, n_topics=5):
     # Join tokens back into strings for TF-IDF
     texts_for_tfidf = [" ".join(tokens) for tokens in processed_texts if tokens]
     if not texts_for_tfidf:
-        return []
+        st.warning("DEBUG: No texts available for TF-IDF. Returning empty topics and data.")
+        return [], []
 
-    vectorizer = TfidfVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    vectorizer = TfidfVectorizer(max_df=0.95, min_df=2, stop_words='english', max_features=1000)
     try:
         tfidf = vectorizer.fit_transform(texts_for_tfidf)
-    except ValueError:
-        st.warning("Could not create TF-IDF matrix. Not enough text data or all words are stop words.")
-        return []
+        st.write(f"DEBUG: TF-IDF matrix shape: {tfidf.shape}")
+    except ValueError as e:
+        st.warning(f"Could not create TF-IDF matrix. Not enough text data or all words are stop words. Error: {e}")
+        return [], []
 
-    nmf_model = NMF(n_components=n_topics, random_state=1)
+    if tfidf.shape[0] < n_topics:
+        st.warning(f"DEBUG: Number of documents ({tfidf.shape[0]}) is less than number of topics requested ({n_topics}). Adjusting n_topics.")
+        n_topics = tfidf.shape[0] if tfidf.shape[0] > 0 else 1
+        if n_topics == 0:
+            st.warning("DEBUG: No documents to create topics from.")
+            return [], []
+
+    nmf_model = NMF(n_components=n_topics, random_state=1, max_iter=100)
     nmf_model.fit(tfidf)
 
     feature_names = vectorizer.get_feature_names_out()
     topics = []
+    topic_data = []
+    
     for topic_idx, topic in enumerate(nmf_model.components_):
-        top_words_idx = topic.argsort()[:-10 - 1:-1]
+        top_words_idx = topic.argsort()[:-11:-1]  # Get top 10 words
         top_words = [feature_names[i] for i in top_words_idx]
-        topics.append(f"Topic {topic_idx + 1}: {', '.join(top_words)}")
+        top_scores = [topic[i] for i in top_words_idx]
+        
+        topic_name = f"Topic {topic_idx + 1}"
+        topic_summary = ", ".join(top_words[:5])
+        topics.append(f"{topic_name}: {topic_summary}")
+        
+        # Store detailed topic data for bubble chart
+        for word, score in zip(top_words, top_scores):
+            topic_data.append({
+                'topic': topic_name,
+                'word': word,
+                'score': score,
+                'topic_id': topic_idx
+            })
+    
+    st.write(f"DEBUG: Extracted {len(topics)} topics and {len(topic_data)} topic-word entries.")
+    return topics, topic_data
+
+# Topic Modeling (backward compatibility)
+@st.cache_data
+def extract_topics(processed_texts, n_topics=5):
+    topics, _ = extract_topics_enhanced(processed_texts, n_topics)
     return topics
 
-
-# Generate sample data function (kept for fallback)
+# Generate sample data function with more realistic posting patterns
 def generate_sample_data(num_posts=1000):
     start_date = datetime.now() - timedelta(days=365)
-    dates = [start_date + timedelta(days=np.random.randint(0, 365)) for _ in range(num_posts)]
-    contents = [f"This is a sample post content {i}. It talks about politics, tech, and general news." for i in range(num_posts)]
     
-    # Generate authors from 'user_1' to 'user_99'
-    authors = [f"user_{np.random.randint(1, 100)}" for _ in range(num_posts)]
+    # Create more realistic posting patterns with varying activity levels
+    dates = []
     
-    # Sample subreddits
-    subreddits = np.random.choice([
-        'Anarchism', 'Libertarian', 'Socialism', 'Politics', 'Technology', 
-        'Science', 'WorldNews', 'Futurology', 'Economics', 'History'
-    ], num_posts)
+    # Generate dates with different patterns to simulate real social media activity
+    for i in range(num_posts):
+        # Create clusters of activity with some random variation
+        base_day = np.random.randint(0, 365)
+        
+        # Add some clustering effect - posts tend to cluster around certain periods
+        if np.random.random() < 0.3:  # 30% chance of being in a "viral" period
+            # Create clusters of posts within a few days
+            cluster_offset = np.random.randint(-3, 4)
+            base_day = max(0, min(364, base_day + cluster_offset))
+        
+        # Add some weekend/weekday patterns
+        day_of_week = (start_date + timedelta(days=base_day)).weekday()
+        if day_of_week < 5:  # Weekday - more likely to have posts
+            if np.random.random() < 0.7:  # 70% chance to keep the date
+                pass
+            else:
+                base_day = np.random.randint(0, 365)  # Random redistribution
+        
+        # Add hour variation to make it more realistic
+        hour_offset = np.random.randint(0, 24) / 24.0
+        post_date = start_date + timedelta(days=base_day + hour_offset)
+        dates.append(post_date)
+    
+    # Generate more varied content
+    content_templates = [
+        "This is amazing news about {topic}! Really excited to see this development.",
+        "Just saw the latest update on {topic}. Not sure how I feel about this...",
+        "Breaking: New developments in {topic} sector. This could change everything!",
+        "Discussing {topic} with colleagues today. Interesting perspectives shared.",
+        "My thoughts on {topic}: We need to be more careful about implementation.",
+        "Great article about {topic}. Highly recommend reading this analysis.",
+        "Concerned about the recent {topic} trends. What are your thoughts?",
+        "Celebrating progress in {topic}! This is what we've been working toward.",
+        "Quick update on {topic} - things are moving faster than expected.",
+        "Deep dive into {topic} research. The data is quite revealing."
+    ]
+    
+    topics = [
+        "artificial intelligence", "climate change", "cryptocurrency", "remote work",
+        "healthcare technology", "renewable energy", "space exploration", "education reform",
+        "digital privacy", "economic policy", "social media", "biotechnology",
+        "urban planning", "cybersecurity", "quantum computing", "sustainable agriculture"
+    ]
+    
+    contents = []
+    for i in range(num_posts):
+        template = np.random.choice(content_templates)
+        topic = np.random.choice(topics)
+        content = template.format(topic=topic)
+        contents.append(content)
+    
+    # Generate authors with some having more posts than others (realistic distribution)
+    author_weights = np.random.zipf(1.5, 99)  # Zipf distribution for realistic author activity
+    author_weights = author_weights / author_weights.sum()
+    authors = np.random.choice([f"user_{i+1}" for i in range(99)], 
+                              size=num_posts, 
+                              p=author_weights)
+    
+    # Sample subreddits with realistic distribution
+    subreddit_list = [
+        'Technology', 'Politics', 'Science', 'WorldNews', 'Futurology', 
+        'Economics', 'History', 'Environment', 'Health', 'Education',
+        'Programming', 'DataScience', 'MachineLearning', 'Cryptocurrency',
+        'ClimateChange', 'SpaceX', 'Tesla', 'Investing', 'Startups', 'Innovation'
+    ]
+    
+    # Create weighted distribution for subreddits
+    subreddit_weights = np.random.dirichlet(np.ones(len(subreddit_list)) * 2)
+    subreddits = np.random.choice(subreddit_list, size=num_posts, p=subreddit_weights)
 
     data = {
         'created_at': dates,
         'content': contents,
         'author': authors,
-        'subreddit': subreddits, # Include subreddit for sample data
+        'subreddit': subreddits,
         'media_type': np.random.choice(['twitter', 'reddit', 'forum'], num_posts)
     }
     return pd.DataFrame(data)
@@ -125,14 +225,16 @@ def load_data():
         with open('data.jsonl', 'r', encoding='utf-8') as file:
             for line_num, line in enumerate(file):
                 try:
-                    json_obj = json.loads(line)
-                    data.append(json_obj.get('data', json_obj))
-                except json.JSONDecodeError:
-                    st.warning(f"DEBUG (load_data): Skipping invalid JSON line {line_num + 1}: {line.strip()[:100]}...")
+                    loaded_json = json.loads(line)
+                    # Handle cases where the actual data might be nested under a 'data' key
+                    data_to_append = loaded_json.get('data', loaded_json)
+                    data.append(data_to_append)
+                except json.JSONDecodeError as e:
+                    st.warning(f"DEBUG (load_data): Skipping invalid JSON line {line_num + 1} due to error: {e}. Line starts with: {line.strip()[:100]}...")
                     continue
         st.write(f"DEBUG (load_data): Successfully read {len(data)} JSON objects from 'data.jsonl'.")
     except FileNotFoundError:
-        st.error("Error: data.jsonl file not found. Please ensure it's in the same directory as app2.py.")
+        st.error("Error: data.jsonl file not found. Please ensure it's in the same directory as app4.py.")
         st.write("DEBUG (load_data): FileNotFoundError encountered.")
         return pd.DataFrame()
     except Exception as e:
@@ -141,203 +243,117 @@ def load_data():
         return pd.DataFrame()
 
     df = pd.DataFrame(data)
+    st.write(f"DEBUG (load_data): DataFrame created from loaded data. Initial shape: {df.shape}")
 
-    # Convert timestamp (prioritize specific columns)
-    timestamp_cols = ['created_utc', 'created', 'timestamp', 'created_at',
-                      'date', 'datetime', 'post_timestamp']
+    timestamp_cols = ['created_utc', 'created', 'timestamp', 'created_at', 'date', 'datetime', 'post_timestamp']
     df['created_at'] = pd.NaT
 
     for col in timestamp_cols:
         if col in df.columns:
             try:
-                # Try parsing as seconds since epoch first
                 df['created_at'] = pd.to_datetime(df[col], unit='s', errors='coerce')
-                if df['created_at'].notna().any(): # Check if any valid dates were parsed
+                if df['created_at'].notna().any():
                     break
                 else:
-                    # If unit='s' failed or resulted in all NaT, try inferring format
                     df['created_at'] = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
                     if df['created_at'].notna().any():
                         break
             except ValueError:
-                # Continue to next column if parsing fails completely
                 continue
 
     if 'created_at' not in df.columns or not df['created_at'].notna().any():
-        st.write("DEBUG (load_data): Warning: No valid timestamp column found or all NaT. Creating empty 'created_at' column.")
-        df['created_at'] = pd.to_datetime(pd.Series(dtype='datetime64[ns]'))
+        st.warning("Warning: No valid timestamp column found or all NaT. Using current date as fallback for sample data.")
+        df['created_at'] = pd.to_datetime(pd.Series([datetime.now()] * len(df))) # Fallback for ALL rows if no valid date found
 
-    # Extract text content (prioritize 'selftext', 'title', 'content')
     text_cols = ['selftext', 'title', 'content', 'text', 'body', 'message', 'subreddit']
-    df['content'] = '' # Initialize with empty string to avoid NaN issues
+    df['content'] = ''
     for col in text_cols:
         if col in df.columns and not df[col].isnull().all():
             df['content'] = df[col].astype(str).fillna('')
             break
-    if df['content'].empty or df['content'].isnull().all(): # Check if content was truly extracted
-         st.write("DEBUG (load_data): Warning: No valid text column found or all NaN. Setting 'content' to empty strings.")
-         df['content'] = '' # Ensure it's not None or NaN for subsequent operations
+    if df['content'].empty or df['content'].isnull().all():
+         st.warning("Warning: No valid text column found or all NaN. Setting 'content' to empty strings.")
+         df['content'] = ''
 
-    # --- UPDATED: Extract user information more robustly ---
     def get_author(row):
-        # Try top-level 'author' first
-        if 'author' in row and pd.notna(row['author']) and row['author'] != 'None':
+        if 'author' in row and pd.notna(row['author']) and str(row['author']).lower() != 'none':
             return str(row['author'])
-        
-        # Then try 'username' or 'user.screen_name'
-        if 'username' in row and pd.notna(row['username']) and row['username'] != 'None':
+        if 'username' in row and pd.notna(row['username']) and str(row['username']).lower() != 'none':
             return str(row['username'])
-        if 'user' in row and isinstance(row['user'], dict) and 'screen_name' in row['user'] and pd.notna(row['user']['screen_name']) and row['user']['screen_name'] != 'None':
+        if 'user' in row and isinstance(row['user'], dict) and 'screen_name' in row['user'] and pd.notna(row['user']['screen_name']) and str(row['user']['screen_name']).lower() != 'none':
             return str(row['user']['screen_name'])
-
-        # Finally, check 'crosspost_parent_list'
         if 'crosspost_parent_list' in row and isinstance(row['crosspost_parent_list'], list):
             for parent_post in row['crosspost_parent_list']:
-                if isinstance(parent_post, dict) and 'author' in parent_post and pd.notna(parent_post['author']) and parent_post['author'] != 'None':
+                if isinstance(parent_post, dict) and 'author' in parent_post and pd.notna(parent_post['author']) and str(parent_post['author']).lower() != 'none':
                     return str(parent_post['author'])
-        
-        return 'Unknown User' # Fallback
+        return 'Unknown User'
 
     df['author'] = df.apply(get_author, axis=1)
 
-    # --- DEBUG: Raw DataFrame content after loading and initial processing ---
-    st.write(f"DEBUG (load_data): Raw DataFrame loaded with {len(df)} rows.")
-    if 'author' in df.columns:
-        unique_authors_loaded = df['author'].dropna().unique()
-        st.write(f"DEBUG (load_data): Unique authors in raw loaded data: {len(unique_authors_loaded)}")
-        # Only print sample if number of unique authors is manageable
-        if len(unique_authors_loaded) < 50:
-            st.write(f"DEBUG (load_data): Sample of unique authors loaded: {unique_authors_loaded[:min(5, len(unique_authors_loaded))]}")
-    else:
-        st.write("DEBUG (load_data): 'author' column not found in loaded DataFrame before return.")
-    
-    st.write(f"DEBUG (load_data): 'created_at' column has {df['created_at'].count()} non-NaT values (out of {len(df)}).")
-    st.write(f"DEBUG (load_data): 'content' column has {df['content'].count()} non-empty values (out of {len(df)}).")
+    st.write(f"DEBUG (load_data): Final DataFrame shape before return: {df.shape}")
+    st.write(f"DEBUG (load_data): Non-NaT 'created_at' count: {df['created_at'].count()}")
+    st.write(f"DEBUG (load_data): Non-empty 'content' count: {df['content'].astype(bool).sum()}")
+    st.write(f"DEBUG (load_data): Unique authors: {df['author'].nunique()}")
     
     return df
 
-# Mock function for AI insights
-def generate_mock_insights(df):
-    insights = [
-        "Identified a surge in discussions related to 'environmental policy' over the last week.",
-        "Sentiment analysis shows a predominantly negative sentiment towards 'economic reforms' in recent posts.",
-        "Key influencers include 'UserXYZ' and 'CommunityABC' based on engagement metrics.",
-        "Detected emerging topics around 'remote work' and 'future of education' with increasing frequency.",
-        "Cross-platform analysis indicates similar trends in 'Twitter' and 'Reddit' regarding 'AI ethics'."
-    ]
-    return insights[1:4] # Return a subset of insights for variety
-
-# Graph creation for Plotly Network Graph
-def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50): # Added n_nodes_to_display parameter
+def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50):
     if df_for_graph.empty:
         st.warning("No data available to generate the network graph.")
         return None
 
-    # Filter out 'None' or 'Unknown User' authors for graph visualization if they are not meaningful
     df_for_graph = df_for_graph[~df_for_graph['author'].isin(['None', 'Unknown User'])].copy()
     if df_for_graph.empty:
         st.warning("No valid author data available to generate the network graph after filtering 'None' or 'Unknown User'.")
         return None
 
-    st.write(f"DEBUG: Number of unique authors found in data: {df_for_graph['author'].nunique()}")
-    st.write(f"DEBUG: Number of unique subreddits found in data: {df_for_graph['subreddit'].nunique()}")
-
     G = nx.Graph()
-
-    # Add nodes for authors and subreddits
     all_authors = df_for_graph['author'].unique()
     all_subreddits = df_for_graph['subreddit'].unique()
 
     for author in all_authors:
-        G.add_node(author, type='author', size=10, color='blue') # Initial size, will be scaled
+        G.add_node(author, type='author', size=10, color='blue')
     for subreddit in all_subreddits:
-        G.add_node(subreddit, type='subreddit', size=5, color='red') # Initial size, constant
+        G.add_node(subreddit, type='subreddit', size=5, color='red')
 
-    st.write(f"DEBUG: Number of nodes in graph G after initial creation (before edges): {G.number_of_nodes()}")
-    st.write(f"DEBUG: Number of author nodes in G (before edges): {len([n for n, data in G.nodes(data=True) if data['type'] == 'author'])}")
-    st.write(f"DEBUG: Number of subreddit nodes in G (before edges): {len([n for n, data in G.nodes(data=True) if data['type'] == 'subreddit'])}")
-
-    # Add edges based on author activity in subreddits
     for index, row in df_for_graph.iterrows():
         author = row['author']
         subreddit = row['subreddit']
-        if author in G and subreddit in G: # Ensure nodes exist
+        if author in G and subreddit in G:
             G.add_edge(author, subreddit, type='posted_in')
 
-    # Add edges based on direct mentions (simple example, need to adjust based on actual data)
-    # This part needs content analysis. For demonstration, we'll assume content contains mentions.
-    # In a real scenario, you'd parse `row['content']` for mentions.
     for index, row in df_for_graph.iterrows():
         author = row['author']
         content = row['content']
-        # Simple regex to find potential mentions starting with u/ or @ (adjust as needed for data format)
         mentions = re.findall(r'(?:u/|@)([a-zA-Z0-9_-]+)', content)
         for mentioned_user in mentions:
-            if mentioned_user in all_authors and mentioned_user != author: # Only add if mentioned user is also an author in our data
+            if mentioned_user in all_authors and mentioned_user != author:
                 if author in G and mentioned_user in G:
                     G.add_edge(author, mentioned_user, type='mentions')
     
-    st.write(f"DEBUG: Number of nodes in graph G after adding edges: {G.number_of_nodes()}")
-    st.write(f"DEBUG: Number of edges in graph G: {G.number_of_edges()}")
-    st.write(f"DEBUG: Number of author nodes in G (after edges): {len([n for n, data in G.nodes(data=True) if data['type'] == 'author'])}")
-
-
-    # --- Handle large graphs for better visualization performance ---
-    # This block is TEMPORARILY COMMENTED OUT for debugging purposes.
-    # It will be re-enabled or modified later.
-
-    # if G.number_of_nodes() > 500: # Adjust this limit as needed
-    #     st.info(f"The network graph has {G.number_of_nodes()} nodes. Displaying the largest connected component (or a sample) for better performance.")
-    #     components = list(nx.connected_components(G))
-    #     if components:
-    #         largest_component_nodes = max(components, key=len)
-    #         G = G.subgraph(largest_component_nodes).copy()
-    #         if G.number_of_nodes() > n_nodes_to_display: # If largest component is still too big, sample
-    #             st.info(f"Largest component ({G.number_of_nodes()} nodes) is still too large. Randomly sampling {n_nodes_to_display} nodes.")
-    #             sampled_nodes = random.sample(list(G.nodes()), n_nodes_to_display)
-    #             G = G.subgraph(sampled_nodes).copy()
-    #     else:
-    #         st.warning("No connected components found in the graph. Graph might be too sparse.")
-    #         return None
-
-
-    # Calculate degrees for sizing nodes
     node_degrees = dict(G.degree())
-
-    # Scale author node sizes based on degree
     author_nodes = [n for n in G.nodes() if G.nodes[n]['type'] == 'author']
     if author_nodes:
         author_degrees = [node_degrees[n] for n in author_nodes]
-        # Avoid division by zero if all degrees are 0 or list is empty
         max_author_degree = max(author_degrees) if author_degrees else 1
         min_author_degree = min(author_degrees) if author_degrees else 0
-
-        # Scale size between 10 and 30 for authors
-        # Using a fixed min/max range for scaling to prevent tiny sizes with small degrees
         scaled_sizes = []
         for degree in author_degrees:
-            if max_author_degree == min_author_degree: # Handle case with uniform degrees
-                scaled_sizes.append(20) # Default size if no variation
+            if max_author_degree == min_author_degree:
+                scaled_sizes.append(20)
             else:
                 scaled_size = 10 + (degree - min_author_degree) * (20 / (max_author_degree - min_author_degree))
                 scaled_sizes.append(scaled_size)
-        
         author_node_sizes_scaled = {n: s for n, s in zip(author_nodes, scaled_sizes)}
     else:
         author_node_sizes_scaled = {}
 
-    # Set subreddit node size (constant or based on a different metric)
     subreddit_nodes = [n for n in G.nodes() if G.nodes[n]['type'] == 'subreddit']
-    subreddit_node_sizes = {n: 8 for n in subreddit_nodes} # Fixed size for subreddits
-
-    # Combine all node sizes
+    subreddit_node_sizes = {n: 8 for n in subreddit_nodes}
     node_sizes = {**author_node_sizes_scaled, **subreddit_node_sizes}
 
+    pos = nx.spring_layout(G, k=0.15, iterations=50, seed=42)
 
-    # Get positions for all nodes
-    pos = nx.spring_layout(G, k=0.15, iterations=50, seed=42) # Adjust k and iterations for layout
-
-    # Prepare node data for Plotly
     node_x = []
     node_y = []
     node_text = []
@@ -351,27 +367,9 @@ def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50): # Added n_
         node_y.append(y)
         node_text.append(f"{node} (Type: {G.nodes[node]['type']}, Degree: {node_degrees[node]})")
         node_color.append(G.nodes[node]['color'])
-        node_size_plot.append(node_sizes.get(node, 10)) # Default size if not explicitly set
+        node_size_plot.append(node_sizes.get(node, 10))
         node_type.append(G.nodes[node]['type'])
 
-
-    # Debugging lengths and samples for nodes
-    st.write(f"DEBUG: Length of author_node_x: {len([x for i, x in enumerate(node_x) if node_type[i] == 'author'])}")
-    st.write(f"DEBUG: Length of author_node_degrees: {len(author_degrees) if 'author_degrees' in locals() else 0}")
-    if 'author_degrees' in locals() and author_degrees:
-        st.write(f"DEBUG: Sample author degrees (first 10): {author_degrees[:10]}")
-    st.write(f"DEBUG: Length of author_node_sizes_scaled: {len(author_node_sizes_scaled)}")
-    if author_node_sizes_scaled:
-        st.write(f"DEBUG: Sample author sizes (first 10): {list(author_node_sizes_scaled.values())[:10]}")
-    if len(node_x) > 0:
-        st.write(f"DEBUG: Sample author_node_x (first 10): {[x for i, x in enumerate(node_x) if node_type[i] == 'author'][:10]}")
-        st.write(f"DEBUG: Sample author_node_y (first 10): {[y for i, y in enumerate(node_y) if node_type[i] == 'author'][:10]}")
-    
-    st.write(f"DEBUG: Length of subreddit_node_x: {len([x for i, x in enumerate(node_x) if node_type[i] == 'subreddit'])}")
-    st.write(f"DEBUG: Length of subreddit_node_sizes: {len(subreddit_node_sizes)}")
-
-
-    # Prepare edge data for Plotly
     edge_x = []
     edge_y = []
     for edge in G.edges():
@@ -392,18 +390,18 @@ def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50): # Added n_
         hoverinfo='text',
         text=node_text,
         marker=dict(
-            showscale=False, # We're setting size manually
+            showscale=False,
             colorscale='YlGnBu',
             reversescale=True,
             color=node_color,
-            size=node_size_plot, # Use calculated sizes
+            size=node_size_plot,
             line_width=2))
 
     fig = go.Figure(data=[edge_trace, node_trace],
                     layout=go.Layout(
-                        title=dict( # Corrected: 'title' is a dictionary
+                        title=dict(
                             text='Author Interaction Network Graph',
-                            font=dict(size=16) # Corrected: font size within 'font' dict
+                            font=dict(size=16)
                         ),
                         showlegend=False,
                         hovermode='closest',
@@ -418,7 +416,6 @@ def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50): # Added n_
                     )
     return fig
 
-# Function to convert plotly figure to base64 for download
 def fig_to_base64(fig):
     img_bytes = BytesIO()
     fig.write_image(img_bytes, format="png")
@@ -426,89 +423,110 @@ def fig_to_base64(fig):
     img_base64 = base64.b64encode(img_bytes.read()).decode("utf-8")
     return img_base64
 
-# Main Streamlit app
 def main():
     st.title("📊 Social Media Analysis Dashboard")
 
     st.sidebar.header("Data Configuration")
     
-    # Load data
     df = load_data()
 
-    # --- Conditional Sample Data Generation (REMAINING THE SAME) ---
     if df.empty or not df['created_at'].notna().any() or not df['content'].notna().any():
         st.warning("No valid data loaded or critical columns are missing/empty. Generating sample data for demonstration.")
         df = generate_sample_data(num_posts=1000)
         st.success("Sample data generated successfully!")
-        st.write("Sample Data Head:")
+        st.write("Sample Data Head (generated):")
         st.dataframe(df.head())
-    # --- END Conditional Sample Data Generation ---
+    
+    st.write(f"DEBUG (main): Initial DataFrame shape after load/sample: {df.shape}")
 
-
-    # Ensure 'subreddit' column exists for filtering and graph, create if missing
     if 'subreddit' not in df.columns:
         st.warning("'subreddit' column not found in data. Some features may be limited.")
-        df['subreddit'] = 'Unknown' # Default value if subreddit is missing
+        df['subreddit'] = 'Unknown'
 
-
-    # Sidebar filters
     st.sidebar.header("Filter Data")
 
-    # Date range filter
-    min_date = df['created_at'].min().date() if not df['created_at'].empty and pd.notna(df['created_at'].min()) else datetime.now().date() - timedelta(days=365)
-    max_date = df['created_at'].max().date() if not df['created_at'].empty and pd.notna(df['created_at'].max()) else datetime.now().date()
+    # Initialize filtered_df immediately after df is finalized - FIXED FROM APP2
+    filtered_df = df.copy()
+    
+    # Date filtering logic from app2.py - FIXED
+    selected_date_range = None
+    if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty and filtered_df['created_at'].min() is not pd.NaT:
+        min_date = filtered_df['created_at'].min().date()
+        max_date = filtered_df['created_at'].max().date()
 
-    date_range = st.sidebar.date_input(
-        "Select Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
+        if min_date == max_date:
+            st.sidebar.write(f"Data available for a single day: {min_date.strftime('%Y-%m-%d')}")
+            single_date_input = st.sidebar.date_input(
+                "Select Date",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date
+            )
+            # Ensure selected_date_range is always a tuple (start_date, end_date)
+            selected_date_range = (single_date_input, single_date_input)
+        else:
+            selected_date_range = st.sidebar.date_input(
+                "Date Range",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date
+            )
 
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        filtered_df = df[(df['created_at'].dt.date >= start_date) & (df['created_at'].dt.date <= end_date)].copy()
+        if selected_date_range and len(selected_date_range) == 2:
+            start_date, end_date = selected_date_range
+            filtered_df = filtered_df[(filtered_df['created_at'].dt.date >= start_date) &
+                                     (filtered_df['created_at'].dt.date <= end_date)].copy()
     else:
-        filtered_df = df.copy()
+        st.sidebar.warning("No valid date column found for filtering.")
 
-    # Keyword search filter
+    st.write(f"DEBUG (main): DataFrame shape after Date Range filter: {filtered_df.shape}")
+
     search_query = st.sidebar.text_input("Search keywords (comma-separated):")
     if search_query:
         keywords = [k.strip().lower() for k in search_query.split(',')]
         filtered_df = filtered_df[filtered_df['content'].str.lower().apply(
             lambda x: any(k in x for k in keywords)
         )].copy()
+    st.write(f"DEBUG (main): DataFrame shape after Keyword filter: {filtered_df.shape}")
 
-    # Sentiment filter
     sentiment_options = ['All', 'Positive', 'Neutral', 'Negative']
     selected_sentiment = st.sidebar.selectbox("Filter by Sentiment:", sentiment_options)
 
-    # Calculate sentiment only once for the filtered_df
     if not filtered_df.empty:
-        if 'sentiment_score' not in filtered_df.columns:
-            # Ensure 'content' column is string type before applying sentiment analysis
-            filtered_df['content'] = filtered_df['content'].astype(str)
-            filtered_df['sentiment_score'] = filtered_df['content'].apply(lambda x: sid.polarity_scores(x)['compound'])
+        if 'sentiment_label' not in filtered_df.columns:
+            st.write("DEBUG: Running NLTK VADER sentiment analysis...")
+            with st.spinner("Performing sentiment analysis..."):
+                filtered_df['content'] = filtered_df['content'].astype(str)
+                # Apply VADER sentiment analysis
+                filtered_df['compound_score'] = filtered_df['content'].apply(lambda text: sentiment_analyzer.polarity_scores(text)['compound'])
+                
+                # Categorize sentiment based on compound score
+                filtered_df['sentiment_label'] = filtered_df['compound_score'].apply(lambda c: 
+                    'Positive' if c >= 0.05 else 
+                    'Negative' if c <= -0.05 else 
+                    'Neutral'
+                )
+                filtered_df['sentiment_numeric_score'] = filtered_df['compound_score'] # Use compound for numeric score
+
+            st.write("DEBUG: NLTK VADER sentiment analysis complete.")
         
-        # --- DEBUG: Sentiment Analysis ---
-        st.write(f"DEBUG (sentiment): filtered_df has {filtered_df.shape[0]} rows before sentiment analysis filter.")
+        df_for_sentiment_charts = filtered_df.copy() 
         
         if selected_sentiment == 'Positive':
-            filtered_df = filtered_df[filtered_df['sentiment_score'] >= 0.05].copy()
+            filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Positive'].copy()
         elif selected_sentiment == 'Neutral':
-            filtered_df = filtered_df[(filtered_df['sentiment_score'] > -0.05) & (filtered_df['sentiment_score'] < 0.05)].copy()
+            filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Neutral'].copy()
         elif selected_sentiment == 'Negative':
-            filtered_df = filtered_df[filtered_df['sentiment_score'] <= -0.05].copy()
+            filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Negative'].copy()
     else:
         st.info("No data to apply sentiment filter.")
+    st.write(f"DEBUG (main): DataFrame shape after Sentiment filter: {filtered_df.shape}")
 
-    # Subreddit filter
-    all_subreddits_available = df['subreddit'].unique()
-    selected_subreddits = st.sidebar.multiselect("Filter by Subreddit:", all_subreddits_available, default=all_subreddits_available)
+    all_subreddits_available = df['subreddit'].unique() # Use original df for all subreddits
+    selected_subreddits = st.sidebar.multiselect("Filter by Subreddit:", all_subreddits_available, default=list(all_subreddits_available)) # Default to all selected
     filtered_df = filtered_df[filtered_df['subreddit'].isin(selected_subreddits)].copy()
+    st.write(f"DEBUG (main): DataFrame shape after Subreddit filter: {filtered_df.shape}")
 
-
-    # Display metrics
     st.subheader("Overview")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -520,137 +538,404 @@ def main():
     with col4:
         st.metric("Unique Subreddits (Filtered)", filtered_df['subreddit'].nunique())
 
-    # Create tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "Sentiment Analysis", "Top Entities", "Word Cloud",
+    tab_activity, tab_sentiment, tab_entities, tab_wordcloud, tab_network, tab_topics, tab_ai = st.tabs([
+        "Activity Trends", "Sentiment Analysis", "Top Entities", "Word Cloud",
         "Author Network Graph", "Topic Modeling", "AI Insights"
     ])
 
-    with tab1:
-        st.header("Sentiment Analysis")
-        if not filtered_df.empty:
-            sentiment_counts = filtered_df['sentiment_score'].apply(lambda x: 'Positive' if x >= 0.05 else ('Negative' if x <= -0.05 else 'Neutral')).value_counts()
+    with tab_activity:
+        st.header("Post Activity Over Time")
+        # Fixed logic from app2.py
+        if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
+            time_df = filtered_df.copy()
+            time_df['date'] = time_df['created_at'].dt.date
+            daily_counts = time_df.groupby('date').size().reset_index(name='count')
             
-            # --- DEBUG: Sentiment Counts ---
-            st.write(f"DEBUG (sentiment): Sentiment counts: {sentiment_counts.to_dict()}") # Show sentiment counts
-            
-            fig = px.pie(
-                names=sentiment_counts.index,
-                values=sentiment_counts.values,
-                title='Overall Sentiment Distribution',
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
+            # Create the line chart
+            fig = px.line(daily_counts, x='date', y='count',
+                          title='Post Volume Over Time',
+                          labels={'date': 'Date', 'count': 'Number of Posts'},
+                          markers=True, # Added markers
+                          line_shape='spline', # Added spline interpolation
+                          hover_data={'date': True, 'count': True} # Show date and count on hover
+                          )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Key Metrics
+            st.subheader("Key Metrics")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Posts", len(filtered_df))
+            if not daily_counts.empty:
+                col2.metric("Start Date", daily_counts['date'].min().strftime('%Y-%m-%d'))
+                col3.metric("End Date", daily_counts['date'].max().strftime('%Y-%m-%d'))
+            
+            if st.checkbox("Show Daily Post Counts"):
+                st.dataframe(daily_counts)
+        else:
+            st.info("No data or 'created_at' column available for activity trend analysis after filters.")
+
+    with tab_sentiment:
+        st.header("Sentiment Analysis")
+        if not df_for_sentiment_charts.empty and 'sentiment_label' in df_for_sentiment_charts.columns:
+            sentiment_counts = df_for_sentiment_charts['sentiment_label'].value_counts()
+            sentiment_df = pd.DataFrame({
+                'Sentiment': sentiment_counts.index,
+                'Count': sentiment_counts.values
+            })
+            
+            # DEBUG: Display the DataFrame used for the pie chart
+            st.write("DEBUG: DataFrame for Sentiment Pie Chart:")
+            st.dataframe(sentiment_df)
+
+            # Explicitly extract labels and values as lists
+            pie_labels = sentiment_df['Sentiment'].tolist()
+            pie_values = sentiment_df['Count'].tolist()
+
+            fig = go.Figure(data=[go.Pie(
+                labels=pie_labels, # Pass explicit list of labels
+                values=pie_values, # Pass explicit list of values
+                textinfo='label+percent+value', # Use Plotly's built-in textinfo
+                insidetextfont=dict(color='white'),
+                hoverinfo='label+percent+value',
+                hole=.3,
+                marker=dict(colors=px.colors.qualitative.Pastel)
+            )])
+            fig.update_layout(
+                title_text='Overall Sentiment Distribution (Before Sentiment Filter)'
+            )
+            st.plotly_chart(fig, use_container_width=True, key="sentiment_pie_chart")
 
             st.subheader("Sentiment Over Time")
-            # Resample by day and calculate mean sentiment score
-            if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
-                daily_sentiment = filtered_df.set_index('created_at')['sentiment_score'].resample('D').mean().reset_index()
+            if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty and 'sentiment_numeric_score' in filtered_df.columns:
+                daily_sentiment = filtered_df.set_index('created_at')['sentiment_numeric_score'].resample('D').mean().reset_index()
                 fig_time = px.line(
                     daily_sentiment,
                     x='created_at',
-                    y='sentiment_score',
-                    title='Average Sentiment Over Time',
-                    labels={'created_at': 'Date', 'sentiment_score': 'Average Sentiment Score'}
+                    y='sentiment_numeric_score',
+                    title='Average Sentiment Over Time (NLTK VADER)', # Updated title
+                    labels={'created_at': 'Date', 'sentiment_numeric_score': 'Average Sentiment Score'},
+                    markers=True, # Added markers
+                    line_shape='spline', # Added spline interpolation
+                    hover_data={'created_at': '|%Y-%m-%d', 'sentiment_numeric_score': ':.2f'} # Show date and score on hover
                 )
                 st.plotly_chart(fig_time, use_container_width=True)
             else:
-                st.warning("Date column not available for sentiment over time analysis.")
+                st.warning("Date or sentiment numeric score column not available for sentiment over time analysis after filters.")
         else:
             st.info("No data to perform sentiment analysis.")
 
-    with tab2:
+    with tab_entities:
         st.header("Top Entities/Authors/Subreddits")
+
         if not filtered_df.empty:
+            # === TOP AUTHORS (Altair Interactive Horizontal Bar Chart) ===
             st.subheader("Top 10 Authors")
-            # Filter out 'Unknown User' from top authors list for display
-            top_authors = filtered_df[filtered_df['author'] != 'Unknown User']['author'].value_counts().nlargest(10).reset_index()
-            top_authors.columns = ['Author', 'Post Count']
-            st.dataframe(top_authors)
+            authors_filtered = filtered_df[filtered_df['author'] != 'Unknown User']
+            author_counts = authors_filtered['author'].value_counts().reset_index()
+            author_counts.columns = ['Author', 'Post Count']
+            top_authors = author_counts.head(10).copy()
+            top_authors['Post Count'] = top_authors['Post Count'].astype(int)
 
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.dataframe(top_authors)
+
+            with col2:
+                if not top_authors.empty:
+                    st.write("DEBUG: Data for authors chart:")
+                    st.dataframe(top_authors)
+                    st.write(f"DEBUG: Data types: {top_authors.dtypes}")
+                    st.write(f"DEBUG: Post Count values: {top_authors['Post Count'].tolist()}")
+
+                    # Altair interactive horizontal bar chart
+                    chart_authors_alt = alt.Chart(top_authors).mark_bar().encode(
+                        x=alt.X('Post Count:Q', title='Post Count'), # Quantity type for numerical axis
+                        y=alt.Y('Author:N', title='Author', sort='-x'), # Nominal type for categorical axis, sorted by x-value
+                        tooltip=['Author', 'Post Count'], # Tooltip on hover
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='viridis')), # CORRECTED: Use 'scheme' for color palette
+                        text=alt.Text('Post Count:Q', format='d') # Display count on bars
+                    ).properties(
+                        title='Top 10 Authors by Post Count'
+                    ).configure_axis(
+                        labelLimit=200 # Allow longer labels if needed
+                    ).interactive() # Enable interactivity like zooming and panning
+
+                    st.altair_chart(chart_authors_alt, use_container_width=True)
+
+            # === TOP SUBREDDITS (Altair Interactive Horizontal Bar Chart) ===
             st.subheader("Top 10 Subreddits")
-            top_subreddits = filtered_df['subreddit'].value_counts().nlargest(10).reset_index()
-            top_subreddits.columns = ['Subreddit', 'Post Count']
-            st.dataframe(top_subreddits)
+            subreddit_counts = filtered_df['subreddit'].value_counts().reset_index()
+            subreddit_counts.columns = ['Subreddit', 'Post Count']
+            top_subreddits = subreddit_counts.head(10).copy()
+            top_subreddits['Post Count'] = top_subreddits['Post Count'].astype(int)
 
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.dataframe(top_subreddits)
+
+            with col2:
+                if not top_subreddits.empty:
+                    st.write("DEBUG: Data for subreddits chart:")
+                    st.dataframe(top_subreddits)
+                    st.write(f"DEBUG: Data types: {top_subreddits.dtypes}")
+                    st.write(f"DEBUG: Post Count values: {top_subreddits['Post Count'].tolist()}")
+
+                    chart_subreddits_alt = alt.Chart(top_subreddits).mark_bar().encode(
+                        x=alt.X('Post Count:Q', title='Post Count'),
+                        y=alt.Y('Subreddit:N', title='Subreddit', sort='-x'),
+                        tooltip=['Subreddit', 'Post Count'],
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='plasma')), # CORRECTED: Use 'scheme'
+                        text=alt.Text('Post Count:Q', format='d')
+                    ).properties(
+                        title='Top 10 Subreddits by Post Count'
+                    ).configure_axis(
+                        labelLimit=200
+                    ).interactive()
+
+                    st.altair_chart(chart_subreddits_alt, use_container_width=True)
+
+            # === FREQUENT WORDS (Altair Interactive Horizontal Bar Chart) ===
             st.subheader("Most Frequent Words (excluding stopwords)")
             processed_texts = preprocess_text(filtered_df['content'])
             all_words = [word for sublist in processed_texts for word in sublist]
             word_freq = Counter(all_words)
-            top_words_df = pd.DataFrame(word_freq.most_common(20), columns=['Word', 'Frequency'])
-            st.dataframe(top_words_df)
+            top_words_df = pd.DataFrame(word_freq.most_common(15), columns=['Word', 'Frequency'])
+
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.dataframe(top_words_df)
+
+            with col2:
+                if not top_words_df.empty:
+                    st.write("DEBUG: Data for words chart:")
+                    st.dataframe(top_words_df)
+                    st.write(f"DEBUG: Data types: {top_words_df.dtypes}")
+                    st.write(f"DEBUG: Frequency values: {top_words_df['Frequency'].tolist()}")
+
+                    chart_words_alt = alt.Chart(top_words_df).mark_bar().encode(
+                        x=alt.X('Frequency:Q', title='Frequency'),
+                        y=alt.Y('Word:N', title='Word', sort='-x'),
+                        tooltip=['Word', 'Frequency'],
+                        color=alt.Color('Frequency:Q', scale=alt.Scale(scheme='cividis')), # CORRECTED: Use 'scheme'
+                        text=alt.Text('Frequency:Q', format='d')
+                    ).properties(
+                        title='Top 15 Most Frequent Words'
+                    ).configure_axis(
+                        labelLimit=200
+                    ).interactive()
+
+                    st.altair_chart(chart_words_alt, use_container_width=True)
+
         else:
-            st.info("No data available for top entities analysis.")
+            st.info("No data available for top entities analysis after filters.")
 
-    with tab3:
-        st.header("Word Cloud")
-        if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
-            processed_texts = preprocess_text(filtered_df['content'])
-            all_words = " ".join([word for sublist in processed_texts for word in sublist])
-            if all_words:
-                wordcloud = WordCloud(width=800, height=400, background_color='white').generate(all_words)
-                plt.figure(figsize=(10, 5))
-                plt.imshow(wordcloud, interpolation='bilinear')
-                plt.axis('off')
-                st.pyplot(plt)
-            else:
-                st.warning("No meaningful words to generate word cloud after preprocessing.")
-        else:
-            st.warning("No content data available for word cloud generation after filtering.")
-
-    with tab4:
-        st.header("Author Interaction Network Graph")
-        if Network is None:
-            st.error("Pyvis library not found. Please install it (`pip install pyvis`) to enable the network graph feature.")
-        else:
-            if 'author' in filtered_df.columns and not filtered_df['author'].empty and 'subreddit' in filtered_df.columns and not filtered_df['subreddit'].empty:
-                # Use only relevant columns for graph to avoid unnecessary data transfer
-                df_for_graph = filtered_df[['author', 'subreddit', 'content']].copy()
-                fig = create_plotly_network_graph(df_for_graph)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
-
-                    # Option to download graph
-                    img_base64 = fig_to_base64(fig)
-                    st.download_button(
-                        label="Download Graph as PNG",
-                        data=base64.b64decode(img_base64),
-                        file_name="author_network_graph.png",
-                        mime="image/png"
-                    )
-                else:
-                    st.info("Network graph could not be generated with the current filters.")
-            else:
-                st.warning("Author and/or Subreddit data missing or empty for graph generation after filtering.")
-
-    with tab5:
+    with tab_topics:
         st.header("Topic Modeling")
         if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
+            st.write(f"DEBUG: filtered_df content head for topic modeling: {filtered_df['content'].head().to_list()}")
             processed_texts = preprocess_text(filtered_df['content'])
-            topics = extract_topics(processed_texts, n_topics=5)
-            st.subheader("Extracted Topics")
-            for i, topic in enumerate(topics):
-                st.write(f"Topic {i + 1}: {topic}")
-        else:
-            st.warning("No content available for topic modeling after filtering.")
+            st.write(f"DEBUG: processed_texts head for topic modeling: {processed_texts.head().to_list()}")
+            
+            # Enhanced topic modeling with bubble chart
+            n_topics = st.slider("Number of Topics", min_value=3, max_value=10, value=5)
+            topics, topic_data = extract_topics_enhanced(processed_texts, n_topics=n_topics)
+            
+            if topics and topic_data:
+                st.subheader("Extracted Topics")
+                for i, topic in enumerate(topics):
+                    st.write(f"**{topic}**")
+                
+                # Create bubble chart for topics
+                st.subheader("Topic Visualization - Bubble Chart")
+                topic_df = pd.DataFrame(topic_data)
+                
+                st.write("DEBUG: topic_df head for bubble chart:")
+                st.dataframe(topic_df.head())
 
-    with tab6: # Renamed tab5 to tab6 due to an extra tab being added in code
+                if not topic_df.empty:
+                    # Create bubble chart
+                    fig_bubble = px.scatter(
+                        topic_df, 
+                        x='topic_id', 
+                        y='score',
+                        size='score',
+                        color='topic',
+                        hover_name='word',
+                        hover_data={'score': ':.3f'},
+                        title='Topic Word Importance (Bubble Size = Importance Score)',
+                        labels={'topic_id': 'Topic Number', 'score': 'Word Importance Score'},
+                        size_max=60
+                    )
+                    
+                    # Customize the layout
+                    fig_bubble.update_layout(
+                        height=600,
+                        xaxis=dict(
+                            tickmode='linear', 
+                            tick0=0, 
+                            dtick=1,
+                            title='Topic Number'
+                        ),
+                        yaxis=dict(title='Word Importance Score'),
+                        showlegend=True,
+                        legend=dict(
+                            orientation="v",
+                            yanchor="top",
+                            y=1,
+                            xanchor="left",
+                            x=1.01
+                        )
+                    )
+                    
+                    # Update x-axis to show proper topic labels
+                    topic_labels = [f"Topic {i+1}" for i in range(n_topics)]
+                    fig_bubble.update_xaxes(
+                        tickvals=list(range(n_topics)),
+                        ticktext=topic_labels
+                    )
+                    
+                    st.plotly_chart(fig_bubble, use_container_width=True)
+                    
+                    # NEW: Alternative - Bar Charts for Each Topic
+                    st.subheader("Top Words per Topic (Bar Charts)")
+                    unique_topics = topic_df['topic'].unique()
+                    for topic_name in unique_topics:
+                        topic_words_df = topic_df[topic_df['topic'] == topic_name].sort_values(by='score', ascending=False).head(10)
+                        if not topic_words_df.empty:
+                            fig_topic_bar = px.bar(
+                                topic_words_df,
+                                x='score',
+                                y='word',
+                                orientation='h',
+                                title=f'Top Words for {topic_name}',
+                                labels={'score': 'Word Importance Score', 'word': 'Word'},
+                                color='score',
+                                color_continuous_scale='viridis'
+                            )
+                            fig_topic_bar.update_layout(yaxis={'categoryorder': 'total ascending'}, height=400)
+                            st.plotly_chart(fig_topic_bar, use_container_width=True)
+
+                    # Topic word details table
+                    if st.checkbox("Show Topic Word Details"):
+                        st.subheader("Topic Word Scores")
+                        # Group by topic and show top words
+                        for topic_id, group in topic_df.groupby('topic_id'):
+                            with st.expander(f"Topic {topic_id + 1} - Word Details"):
+                                topic_words = group.sort_values('score', ascending=False).head(10)
+                                st.dataframe(topic_words[['word', 'score']].reset_index(drop=True))
+                else:
+                    st.warning("Could not generate topic data for visualization.")
+            else:
+                st.warning("Could not extract topics. Not enough text data or all words are stop words.")
+        else:
+            st.warning("No content available for topic modeling after filters.")
+
+    with tab_ai:
         st.header("AI-Generated Insights")
+        
+        # Enhanced insights section
+        if not filtered_df.empty:
+            st.subheader("📊 Automated Data Insights")
+            
+            with st.spinner("Analyzing data patterns..."):
+                enhanced_insights = generate_enhanced_insights(filtered_df)
+            
+            # Display insights in an organized manner
+            st.markdown("### Key Findings:")
+            for insight in enhanced_insights:
+                st.markdown(f"• {insight}")
+            
+            # Additional analysis sections
+            st.markdown("---")
+            
+            # Content analysis
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📈 Content Metrics")
+                if 'content' in filtered_df.columns:
+                    content_lengths = filtered_df['content'].str.len()
+                    fig_content = px.histogram(
+                        x=content_lengths,
+                        nbins=30,
+                        title='Distribution of Post Lengths',
+                        labels={'x': 'Character Count', 'y': 'Number of Posts'}
+                    )
+                    st.plotly_chart(fig_content, use_container_width=True)
+            
+            with col2:
+                st.subheader("📅 Temporal Patterns")
+                if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
+                    hourly_activity = filtered_df.copy()
+                    hourly_activity['hour'] = hourly_activity['created_at'].dt.hour
+                    hourly_counts = hourly_activity['hour'].value_counts().sort_index()
+                    
+                    fig_hourly = px.bar(
+                        x=hourly_counts.index,
+                        y=hourly_counts.values,
+                        title='Posts by Hour of Day',
+                        labels={'x': 'Hour', 'y': 'Number of Posts'}
+                    )
+                    st.plotly_chart(fig_hourly, use_container_width=True)
+            
+            # Engagement analysis
+            st.subheader("🔍 Advanced Analysis")
+            
+            if st.button("Generate Detailed Report"):
+                with st.spinner("Generating comprehensive analysis..."):
+                    report = f"""
+                    ## Comprehensive Social Media Analysis Report
+                    
+                    **Dataset Overview:**
+                    - Total Posts Analyzed: {len(filtered_df):,}
+                    - Date Range: {filtered_df['created_at'].min().strftime('%Y-%m-%d') if 'created_at' in filtered_df.columns else 'N/A'} to {filtered_df['created_at'].max().strftime('%Y-%m-%d') if 'created_df.columns' in filtered_df.columns else 'N/A'}
+                    - Unique Authors: {filtered_df['author'].nunique():,}
+                    - Communities Covered: {filtered_df['subreddit'].nunique():,}
+                    
+                    **Content Analysis:**
+                    - Average Post Length: {filtered_df['content'].str.len().mean():.0f} characters
+                    - Most Active Author: {filtered_df['author'].value_counts().index[0] if not filtered_df['author'].empty else 'N/A'}
+                    - Most Popular Community: {filtered_df['subreddit'].value_counts().index[0] if not filtered_df['subreddit'].empty else 'N/A'}
+                    
+                    **Sentiment Overview:**
+                    {filtered_df['sentiment_label'].value_counts().to_string() if 'sentiment_label' in filtered_df.columns else 'Sentiment analysis not available'}
+                    
+                    **Key Recommendations:**
+                    1. Focus content strategy on peak activity hours
+                    2. Engage with top contributors to build community
+                    3. Monitor sentiment trends for early issue detection
+                    4. Leverage popular topics for content planning
+                    """
+                    
+                    st.markdown(report)
+                    
+                    # Download report
+                    st.download_button(
+                        label="Download Full Report",
+                        data=report,
+                        file_name=f"social_media_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                        mime="text/markdown"
+                    )
+        
+        # Original OpenAI integration
+        st.markdown("---")
+        st.subheader("🤖 OpenAI-Powered Insights")
         openai_api_key = st.sidebar.text_input("Enter your OpenAI API key:",
                                                 type='password')
         if openai_api_key:
             if 'content' in filtered_df.columns and not filtered_df['content'].empty:
-                with st.spinner("Generating AI insights..."):\
+                with st.spinner("Generating AI insights..."):
                     insights = generate_mock_insights(filtered_df)
+                st.markdown("**AI-Generated Insights:**")
                 for insight in insights:
-                        st.markdown(f"- {insight}")
+                    st.markdown(f"- {insight}")
             else:
-                st.warning("No content data available for AI analysis after filtering.")
+                st.warning("No content data available for AI analysis after filters.")
         else:
             st.info("Enter an OpenAI API key in the sidebar to enable AI-generated insights.")
 
     if st.sidebar.checkbox("Show Raw Data"):
-        st.subheader("Raw Data Sample")
+        st.subheader("Raw Data Sample (after all filters)")
         st.dataframe(filtered_df.head(100))
 
     st.markdown("---")
