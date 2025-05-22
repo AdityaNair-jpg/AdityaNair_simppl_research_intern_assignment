@@ -96,26 +96,89 @@ def extract_topics(processed_texts, n_topics=5):
     return topics
 
 
-# Generate sample data function (kept for fallback)
+# Generate sample data function with more realistic posting patterns
 def generate_sample_data(num_posts=1000):
     start_date = datetime.now() - timedelta(days=365)
-    dates = [start_date + timedelta(days=np.random.randint(0, 365)) for _ in range(num_posts)]
-    contents = [f"This is a sample post content {i}. It talks about politics, tech, and general news. With some positive words like amazing and good, and some negative words like terrible." for i in range(num_posts)]
     
-    # Generate authors from 'user_1' to 'user_99'
-    authors = [f"user_{np.random.randint(1, 100)}" for _ in range(num_posts)]
+    # Create more realistic posting patterns with varying activity levels
+    dates = []
     
-    # Sample subreddits
-    subreddits = np.random.choice([
-        'Anarchism', 'Libertarian', 'Socialism', 'Politics', 'Technology', 
-        'Science', 'WorldNews', 'Futurology', 'Economics', 'History'
-    ], num_posts)
+    # Generate dates with different patterns to simulate real social media activity
+    for i in range(num_posts):
+        # Create clusters of activity with some random variation
+        base_day = np.random.randint(0, 365)
+        
+        # Add some clustering effect - posts tend to cluster around certain periods
+        if np.random.random() < 0.3:  # 30% chance of being in a "viral" period
+            # Create clusters of posts within a few days
+            cluster_offset = np.random.randint(-3, 4)
+            base_day = max(0, min(364, base_day + cluster_offset))
+        
+        # Add some weekend/weekday patterns
+        day_of_week = (start_date + timedelta(days=base_day)).weekday()
+        if day_of_week < 5:  # Weekday - more likely to have posts
+            if np.random.random() < 0.7:  # 70% chance to keep the date
+                pass
+            else:
+                base_day = np.random.randint(0, 365)  # Random redistribution
+        
+        # Add hour variation to make it more realistic
+        hour_offset = np.random.randint(0, 24) / 24.0
+        post_date = start_date + timedelta(days=base_day + hour_offset)
+        dates.append(post_date)
+    
+    # Generate more varied content
+    content_templates = [
+        "This is amazing news about {topic}! Really excited to see this development.",
+        "Just saw the latest update on {topic}. Not sure how I feel about this...",
+        "Breaking: New developments in {topic} sector. This could change everything!",
+        "Discussing {topic} with colleagues today. Interesting perspectives shared.",
+        "My thoughts on {topic}: We need to be more careful about implementation.",
+        "Great article about {topic}. Highly recommend reading this analysis.",
+        "Concerned about the recent {topic} trends. What are your thoughts?",
+        "Celebrating progress in {topic}! This is what we've been working toward.",
+        "Quick update on {topic} - things are moving faster than expected.",
+        "Deep dive into {topic} research. The data is quite revealing."
+    ]
+    
+    topics = [
+        "artificial intelligence", "climate change", "cryptocurrency", "remote work",
+        "healthcare technology", "renewable energy", "space exploration", "education reform",
+        "digital privacy", "economic policy", "social media", "biotechnology",
+        "urban planning", "cybersecurity", "quantum computing", "sustainable agriculture"
+    ]
+    
+    contents = []
+    for i in range(num_posts):
+        template = np.random.choice(content_templates)
+        topic = np.random.choice(topics)
+        content = template.format(topic=topic)
+        contents.append(content)
+    
+    # Generate authors with some having more posts than others (realistic distribution)
+    author_weights = np.random.zipf(1.5, 99)  # Zipf distribution for realistic author activity
+    author_weights = author_weights / author_weights.sum()
+    authors = np.random.choice([f"user_{i+1}" for i in range(99)], 
+                              size=num_posts, 
+                              p=author_weights)
+    
+    # Sample subreddits with realistic distribution
+    subreddit_list = [
+        'Technology', 'Politics', 'Science', 'WorldNews', 'Futurology', 
+        'Economics', 'History', 'Environment', 'Health', 'Education',
+        'Programming', 'DataScience', 'MachineLearning', 'Cryptocurrency',
+        'ClimateChange', 'SpaceX', 'Tesla', 'Investing', 'Startups', 'Innovation'
+    ]
+    
+    # Create weighted distribution for subreddits
+    subreddit_weights = np.random.dirichlet(np.ones(len(subreddit_list)) * 2)
+    subreddits = np.random.choice(subreddit_list, size=num_posts, p=subreddit_weights)
 
     data = {
         'created_at': dates,
         'content': contents,
         'author': authors,
-        'subreddit': subreddits, # Include subreddit for sample data
+        'subreddit': subreddits,
         'media_type': np.random.choice(['twitter', 'reddit', 'forum'], num_posts)
     }
     return pd.DataFrame(data)
@@ -359,23 +422,41 @@ def main():
 
     st.sidebar.header("Filter Data")
 
-    min_date = df['created_at'].min().date() if not df['created_at'].empty and pd.notna(df['created_at'].min()) else datetime.now().date() - timedelta(days=365)
-    max_date = df['created_at'].max().date() if not df['created_at'].empty and pd.notna(df['created_at'].max()) else datetime.now().date()
+    # Initialize filtered_df immediately after df is finalized - FIXED FROM APP2
+    filtered_df = df.copy()
+    
+    # Date filtering logic from app2.py - FIXED
+    selected_date_range = None
+    if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty and filtered_df['created_at'].min() is not pd.NaT:
+        min_date = filtered_df['created_at'].min().date()
+        max_date = filtered_df['created_at'].max().date()
 
-    date_range = st.sidebar.date_input(
-        "Select Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
+        if min_date == max_date:
+            st.sidebar.write(f"Data available for a single day: {min_date.strftime('%Y-%m-%d')}")
+            single_date_input = st.sidebar.date_input(
+                "Select Date",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date
+            )
+            # Ensure selected_date_range is always a tuple (start_date, end_date)
+            selected_date_range = (single_date_input, single_date_input)
+        else:
+            selected_date_range = st.sidebar.date_input(
+                "Date Range",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date
+            )
 
-    filtered_df = df.copy() # Start with a full copy
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        # Add 1 day to end_date to include the entire end_date
-        filtered_df = filtered_df[(filtered_df['created_at'].dt.date >= start_date) & (filtered_df['created_at'].dt.date <= end_date)].copy()
+        if selected_date_range and len(selected_date_range) == 2:
+            start_date, end_date = selected_date_range
+            filtered_df = filtered_df[(filtered_df['created_at'].dt.date >= start_date) &
+                                     (filtered_df['created_at'].dt.date <= end_date)].copy()
+    else:
+        st.sidebar.warning("No valid date column found for filtering.")
+
     st.write(f"DEBUG (main): DataFrame shape after Date Range filter: {filtered_df.shape}")
-
 
     search_query = st.sidebar.text_input("Search keywords (comma-separated):")
     if search_query:
@@ -384,7 +465,6 @@ def main():
             lambda x: any(k in x for k in keywords)
         )].copy()
     st.write(f"DEBUG (main): DataFrame shape after Keyword filter: {filtered_df.shape}")
-
 
     sentiment_options = ['All', 'Positive', 'Neutral', 'Negative']
     selected_sentiment = st.sidebar.selectbox("Filter by Sentiment:", sentiment_options)
@@ -419,12 +499,10 @@ def main():
         st.info("No data to apply sentiment filter.")
     st.write(f"DEBUG (main): DataFrame shape after Sentiment filter: {filtered_df.shape}")
 
-
     all_subreddits_available = df['subreddit'].unique() # Use original df for all subreddits
     selected_subreddits = st.sidebar.multiselect("Filter by Subreddit:", all_subreddits_available, default=list(all_subreddits_available)) # Default to all selected
     filtered_df = filtered_df[filtered_df['subreddit'].isin(selected_subreddits)].copy()
     st.write(f"DEBUG (main): DataFrame shape after Subreddit filter: {filtered_df.shape}")
-
 
     st.subheader("Overview")
     col1, col2, col3, col4 = st.columns(4)
@@ -444,16 +522,32 @@ def main():
 
     with tab_activity:
         st.header("Post Activity Over Time")
-        if not filtered_df.empty and 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
-            daily_posts = filtered_df.set_index('created_at').resample('D').size().reset_index(name='Post Count')
-            fig_activity = px.line(
-                daily_posts,
-                x='created_at',
-                y='Post Count',
-                title='Number of Posts Over Time',
-                labels={'created_at': 'Date', 'Post Count': 'Number of Posts'}
-            )
-            st.plotly_chart(fig_activity, use_container_width=True)
+        # Fixed logic from app2.py
+        if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
+            time_df = filtered_df.copy()
+            time_df['date'] = time_df['created_at'].dt.date
+            daily_counts = time_df.groupby('date').size().reset_index(name='count')
+            
+            # Create the line chart
+            fig = px.line(daily_counts, x='date', y='count',
+                          title='Post Volume Over Time',
+                          labels={'date': 'Date', 'count': 'Number of Posts'},
+                          markers=True, # Added markers
+                          line_shape='spline', # Added spline interpolation
+                          hover_data={'date': True, 'count': True} # Show date and count on hover
+                          )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Key Metrics
+            st.subheader("Key Metrics")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Posts", len(filtered_df))
+            if not daily_counts.empty:
+                col2.metric("Start Date", daily_counts['date'].min().strftime('%Y-%m-%d'))
+                col3.metric("End Date", daily_counts['date'].max().strftime('%Y-%m-%d'))
+            
+            if st.checkbox("Show Daily Post Counts"):
+                st.dataframe(daily_counts)
         else:
             st.info("No data or 'created_at' column available for activity trend analysis after filters.")
 
@@ -496,7 +590,10 @@ def main():
                     x='created_at',
                     y='sentiment_numeric_score',
                     title='Average Sentiment Over Time (NLTK VADER)', # Updated title
-                    labels={'created_at': 'Date', 'sentiment_numeric_score': 'Average Sentiment Score'}
+                    labels={'created_at': 'Date', 'sentiment_numeric_score': 'Average Sentiment Score'},
+                    markers=True, # Added markers
+                    line_shape='spline', # Added spline interpolation
+                    hover_data={'created_at': '|%Y-%m-%d', 'sentiment_numeric_score': ':.2f'} # Show date and score on hover
                 )
                 st.plotly_chart(fig_time, use_container_width=True)
             else:
