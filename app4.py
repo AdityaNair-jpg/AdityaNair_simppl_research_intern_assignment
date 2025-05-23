@@ -1077,8 +1077,16 @@ def main():
         # Original OpenAI integration
         st.markdown("---")
         st.subheader("🤖 OpenAI-Powered Insights")
+
         openai_api_key = st.sidebar.text_input("Enter your OpenAI API key:",
                                                 type='password')
+
+        
+        
+        # In a production app, use st.secrets or environment variables.
+        openai_api_key = st.secrets.get("OPENAI_API_KEY")
+        
+
         if openai_api_key:
             if 'content' in filtered_df.columns and not filtered_df['content'].empty:
                 with st.spinner("Generating AI insights..."):
