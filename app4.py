@@ -80,7 +80,7 @@ def load_spacy_model_from_disk():
 
     # Check if the model directory already exists and contains model files
     if not os.path.exists(model_dir) or not os.listdir(model_dir):
-        st.info(f"Downloading spaCy model '{model_name}' to local directory...")
+        
         try:
             # Construct the direct URL to the .whl file on spaCy's GitHub releases
             whl_url = f"https://github.com/explosion/spacy-models/releases/download/{model_name}-{model_version}/{model_name}-{model_version}-py3-none-any.whl"
@@ -113,7 +113,7 @@ def load_spacy_model_from_disk():
                                 os.makedirs(os.path.dirname(dest_path), exist_ok=True) # Ensure parent dir exists
                                 with open(dest_path, "wb") as outfile:
                                     outfile.write(zip_ref.read(member))
-                    st.success(f"Successfully downloaded and extracted spaCy model to {model_dir}")
+                    
                 else:
                     st.error(f"Error: Could not find model data within the downloaded wheel for {model_name}-{model_version}. Check the model URL and structure.")
                     return None # Fail gracefully if model data isn't found within the wheel
@@ -130,7 +130,7 @@ def load_spacy_model_from_disk():
 
     try:
         # Load the model from the extracted directory
-        st.info(f"Loading spaCy model '{model_name}' from local directory...")
+        
         nlp = spacy.load(model_dir)
         return nlp
     except Exception as e:
