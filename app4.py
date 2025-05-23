@@ -914,7 +914,7 @@ def main():
                     # Changed background color of word cloud for better contrast with new theme
                     wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='Blues').generate(all_words)
                     plt.figure(figsize=(10, 5))
-                    st.image(wordcloud.to_array(), caption='Word Cloud', use_column_width=True)
+                    plt.imshow(wordcloud, interpolation='bilinear')
                     plt.axis('off')
                     st.pyplot(plt)
                 else:
