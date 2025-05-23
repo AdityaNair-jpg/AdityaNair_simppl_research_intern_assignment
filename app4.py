@@ -81,25 +81,10 @@ def load_spacy_model():
         # After download, load it
         nlp = spacy.load("en_core_web_sm")
     return nlp
-# --- NEW: spaCy Model Loading ---
-@st.cache_resource
-def setup_spacy_model():
-    """
-    Loads the spaCy English model.
-    This function uses st.cache_resource to ensure it runs only once per app session.
-    """
-    try:
-        # Attempt to load the small English model
-        nlp = spacy.load("en_core_web_sm")
-        return nlp
-    except Exception as e:
-        # In a cached function, direct st.error() might not be ideal.
-        # Store error in session state for display in the main app.
-        st.session_state['spacy_load_error'] = f"Error loading spaCy model: {e}. Please ensure it's installed and downloaded: `pip install spacy && python -m spacy download en_core_web_sm`"
-        return None
+
 
 # Call the cached function to load the spaCy model
-nlp = setup_spacy_model()
+nlp = load_spacy_model()
 
 # Initialize session state for NER debug messages if not present
 if 'ner_debug_messages' not in st.session_state:
