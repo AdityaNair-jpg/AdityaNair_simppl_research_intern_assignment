@@ -17,5 +17,4 @@ pyvis==0.3.2
 altair==5.0.1
 kaleido==0.2.1  
 spacy==3.8.0
-en-core-web-sm==3.8.0
 rich==13.7.0
