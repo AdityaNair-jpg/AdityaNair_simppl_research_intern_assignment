@@ -65,7 +65,22 @@ def setup_nltk_resources():
 
 # Call the cached function once at the very beginning to get the analyzer and stopwords
 sentiment_analyzer, stop_words_nltk = setup_nltk_resources()
-
+@st.cache_resource
+def load_spacy_model():
+    """
+    Downloads and loads the 'en_core_web_sm' spaCy model.
+    Uses st.cache_resource to ensure it runs only once per deployment.
+    """
+    try:
+        # Attempt to load the model; if it's not downloaded, an OSError will be raised
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        # If the model is not found, download it
+        st.info("Downloading spaCy model 'en_core_web_sm' (this may take a moment)...")
+        spacy.cli.download("en_core_web_sm")
+        # After download, load it
+        nlp = spacy.load("en_core_web_sm")
+    return nlp
 # --- NEW: spaCy Model Loading ---
 @st.cache_resource
 def setup_spacy_model():
