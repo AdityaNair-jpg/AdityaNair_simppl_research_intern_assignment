@@ -21,6 +21,9 @@ from sklearn.decomposition import NMF
 import re
 import os
 import random
+import requests
+import zipfile
+import io
 import warnings
 import plotly.graph_objects as go
 import altair as alt
@@ -66,28 +69,77 @@ def setup_nltk_resources():
 # Call the cached function once at the very beginning to get the analyzer and stopwords
 sentiment_analyzer, stop_words_nltk = setup_nltk_resources()
 @st.cache_resource
-def load_spacy_model():
-    """
-    Downloads and loads the 'en_core_web_sm' spaCy model.
-    Uses st.cache_resource to ensure it runs only once per deployment.
-    Handles download if not found.
-    """
+def load_spacy_model_from_disk():
+    model_name = "en_core_web_sm"
+    model_version = "3.8.0" # Make sure this matches the desired version
+
+    # Define a writable path within your app's directory
+    # This will create a 'spacy_models' folder next to your app.py
+    app_root_dir = os.path.dirname(os.path.abspath(__file__))
+    model_dir = os.path.join(app_root_dir, "spacy_models", model_name)
+
+    # Check if the model directory already exists and contains model files
+    if not os.path.exists(model_dir) or not os.listdir(model_dir):
+        st.info(f"Downloading spaCy model '{model_name}' to local directory...")
+        try:
+            # Construct the direct URL to the .whl file on spaCy's GitHub releases
+            whl_url = f"https://github.com/explosion/spacy-models/releases/download/{model_name}-{model_version}/{model_name}-{model_version}-py3-none-any.whl"
+
+            response = requests.get(whl_url, stream=True)
+            response.raise_for_status() # Raise an exception for bad status codes
+
+            # Create the directory if it doesn't exist
+            os.makedirs(model_dir, exist_ok=True)
+
+            # Extract the contents of the wheel file (it's a zip archive)
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+                # Find the root directory of the model data within the .whl
+                model_root_in_zip = None
+                for name in zip_ref.namelist():
+                    if name.startswith(f"{model_name}/") and f"{model_name}-{model_version}" in name:
+                        # Example: 'en_core_web_sm/en_core_web_sm-3.8.0/'
+                        model_root_in_zip = name.split(f"{model_name}-{model_version}")[0] + f"{model_name}-{model_version}"
+                        break
+
+                if model_root_in_zip:
+                    # Extract only the relevant model files to our local model_dir
+                    for member in zip_ref.namelist():
+                        if member.startswith(model_root_in_zip):
+                            # Construct the destination path, preserving internal directory structure
+                            dest_path = os.path.join(model_dir, os.path.relpath(member, model_root_in_zip))
+                            if member.endswith('/'): # If it's a directory
+                                os.makedirs(dest_path, exist_ok=True)
+                            else: # If it's a file
+                                os.makedirs(os.path.dirname(dest_path), exist_ok=True) # Ensure parent dir exists
+                                with open(dest_path, "wb") as outfile:
+                                    outfile.write(zip_ref.read(member))
+                    st.success(f"Successfully downloaded and extracted spaCy model to {model_dir}")
+                else:
+                    st.error(f"Error: Could not find model data within the downloaded wheel for {model_name}-{model_version}. Check the model URL and structure.")
+                    return None # Fail gracefully if model data isn't found within the wheel
+
+        except requests.exceptions.RequestException as e:
+            st.error(f"Failed to download spaCy model from URL: {whl_url}. Error: {e}")
+            return None
+        except zipfile.BadZipFile:
+            st.error("Downloaded file is not a valid zip archive. Check the model URL.")
+            return None
+        except Exception as e:
+            st.error(f"An unexpected error occurred during model download/extraction: {e}")
+            return None
+
     try:
-        # Attempt to load the model directly; if it's not downloaded, an OSError will be raised
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        # If the model is not found, download it using spacy.cli.download
-        st.info("Downloading spaCy model 'en_core_web_sm' (this may take a moment)...")
-        # This command explicitly downloads the model
-        spacy.cli.download("en_core_web_sm")
-        # After successful download, load it
-        nlp = spacy.load("en_core_web_sm")
-    return nlp
+        # Load the model from the extracted directory
+        st.info(f"Loading spaCy model '{model_name}' from local directory...")
+        nlp = spacy.load(model_dir)
+        return nlp
+    except Exception as e:
+        st.error(f"Error loading spaCy model from local directory '{model_dir}': {e}")
+        return None
 
-
-
-# Call the cached function to load the spaCy model
-nlp = load_spacy_model()
+# --- Call this new function to load the spaCy model ---
+# Make sure this line replaces your old 'nlp = load_spacy_model()' call
+nlp = load_spacy_model_from_disk()
 
 # Initialize session state for NER debug messages if not present
 if 'ner_debug_messages' not in st.session_state:
