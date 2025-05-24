@@ -600,7 +600,7 @@ def main():
                 pie_labels = sentiment_df['Sentiment'].tolist()
                 pie_values = sentiment_df['Count'].tolist()
 
-                sentiment_colors = {'Positive': '#28a745', 'Neutral': '#ffc107', 'Negative': '#dc3545'} 
+                sentiment_colors = {'Positive': '#ED5983', 'Neutral': '#EFCC98', 'Negative': '#782B9D'} 
                 pie_marker_colors = [sentiment_colors[s] for s in pie_labels]
 
                 fig = go.Figure(data=[go.Pie(
@@ -641,7 +641,7 @@ def main():
                         x=alt.X('Post Count:Q', title='Post Count'), 
                         y=alt.Y('Author:N', title='Author', sort='-x'), 
                         tooltip=['Author', 'Post Count'], 
-                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='spectral')), 
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='magma')), 
                         text=alt.Text('Post Count:Q', format='d') 
                     ).properties(
                         title='Top 10 Authors by Post Count'
@@ -662,7 +662,7 @@ def main():
                         x=alt.X('Post Count:Q', title='Post Count'),
                         y=alt.Y('Subreddit:N', title='Subreddit', sort='-x'),
                         tooltip=['Subreddit', 'Post Count'],
-                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='viridis')), 
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='magma')), 
                         text=alt.Text('Post Count:Q', format='d')
                     ).properties(
                         title='Top 10 Subreddits by Post Count'
@@ -707,7 +707,7 @@ def main():
                 processed_texts = preprocess_text(filtered_df['content'])
                 all_words = " ".join([word for sublist in processed_texts for word in sublist])
                 if all_words:
-                    wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='Blues').generate(all_words)
+                    wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='gnuplot').generate(all_words)
                     plt.figure(figsize=(10, 5))
                     plt.imshow(wordcloud, interpolation='bilinear')
                     plt.axis('off')
@@ -896,49 +896,6 @@ def main():
                             
                             st.altair_chart(heatmap_chart, use_container_width=True)
                             
-                            if st.checkbox("Show Political Subreddit Statistics"):
-                                st.subheader("Detailed Statistics")
-                                
-                                political_counts = political_posts['political_lean'].value_counts()
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.write("**Posts by Political Lean:**")
-                                    for lean, count in political_counts.items():
-                                        st.write(f"- {lean}: {count:,} posts")
-                                
-                                with col2:
-                                    st.write("**Subreddit Classification:**")
-                                    for lean, subs in political_subreddits.items():
-                                        present_subs = [s for s in subs if s.lower() in filtered_df['subreddit'].str.lower().values]
-                                        if present_subs:
-                                            st.write(f"**{lean}:** {', '.join(present_subs)}")
-                                
-                                st.subheader("Average Topic Probabilities by Political Lean")
-                                display_df = political_topic_means.set_index('political_lean')
-                                st.dataframe(display_df.round(4))
-                                
-                                st.subheader("Most Distinctive Topics by Political Lean")
-                                for lean in political_topic_means['political_lean'].unique():
-                                    lean_data = political_topic_means[political_topic_means['political_lean'] == lean]
-                                    topic_cols = [col for col in lean_data.columns if col != 'political_lean']
-                                    
-                                    max_topic_idx = lean_data[topic_cols].iloc[0].idxmax()
-                                    max_prob = lean_data[topic_cols].iloc[0].max()
-                                    
-                                    st.write(f"**{lean}**: {max_topic_idx} (probability: {max_prob:.3f})")
-                        
-                        else:
-                            st.info("No posts found from recognized political subreddits in the current dataset. The analysis works best with data from subreddits like: r/conservative, r/liberal, r/neoliberal, r/socialism, etc.")
-                            
-                            available_subs = filtered_df['subreddit'].value_counts().head(10)
-                            st.write("**Available subreddits in your data:**")
-                            for sub, count in available_subs.items():
-                                st.write(f"- r/{sub}: {count} posts")
-                    else:
-                        st.warning("Subreddit information not available for political analysis.")
-
                     st.markdown("---")
                     st.subheader("Top Words per Topic (Interactive Bar Charts)")
                     st.write("Explore the most significant words and their importance scores for each individual topic below.")
@@ -952,23 +909,13 @@ def main():
                                 x=alt.X('score:Q', title='Importance Score'),
                                 y=alt.Y('word:N', title='Word', sort='-x'),
                                 tooltip=['word', alt.Tooltip('score', format='.3f')],
-                                color=alt.Color('score:Q', scale=alt.Scale(scheme='cividis')),
+                                color=alt.Color('score:Q', scale=alt.Scale(scheme='magma')),
                                 text=alt.Text('score:Q', format='.2f')
                             ).properties(
                                 title=f'{topic_label}'
                             ).interactive()
 
                             st.altair_chart(chart_topic_bar_alt, use_container_width=True)
-
-                    if st.checkbox("Show Raw Topic Word Details"):
-                        st.subheader("Topic Word Scores Table")
-                        st.write("This table provides the raw importance scores for each word within its topic.")
-                        for topic_id, group in topic_df.groupby('topic_id'):
-                            with st.expander(f"{st.session_state.custom_topic_names[topic_id]} - Word Details"):
-                                topic_words = group.sort_values('score', ascending=False).head(10)
-                                st.dataframe(topic_words[['word', 'score']].reset_index(drop=True))
-                else:
-                    st.warning("Could not extract topics or document-topic distributions. Not enough text data or all words are stop words. Please ensure your data is clean and sufficient for topic modeling.")
             else:
                 st.warning("No content available for topic modeling after filters. Please upload data and apply filters to analyze topics.")
             
