@@ -33,7 +33,6 @@ from ai_insights import generate_enhanced_insights, generate_mock_insights
 
 warnings.filterwarnings('ignore')
 
-# Set page configuration
 st.set_page_config(
     page_title="Social Media Analysis Dashboard",
     page_icon="📊",
@@ -41,13 +40,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- REVISED NLTK DOWNLOAD & INITIALIZATION BLOCK ---
 @st.cache_resource
 def setup_nltk_resources():
-    """
-    Downloads necessary NLTK data and initializes the sentiment analyzer and stopwords.
-    This function uses st.cache_resource to ensure it runs only once per app session.
-    """
+    
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
     except (LookupError, Exception):
@@ -66,57 +61,47 @@ def setup_nltk_resources():
     
     return analyzer, stop_words_set
 
-# Call the cached function once at the very beginning to get the analyzer and stopwords
 sentiment_analyzer, stop_words_nltk = setup_nltk_resources()
 @st.cache_resource
 def load_spacy_model_from_disk():
     model_name = "en_core_web_sm"
-    model_version = "3.8.0" # Make sure this matches the desired version
+    model_version = "3.8.0" 
 
-    # Define a writable path within your app's directory
-    # This will create a 'spacy_models' folder next to your app.py
     app_root_dir = os.path.dirname(os.path.abspath(__file__))
     model_dir = os.path.join(app_root_dir, "spacy_models", model_name)
 
-    # Check if the model directory already exists and contains model files
     if not os.path.exists(model_dir) or not os.listdir(model_dir):
         
         try:
-            # Construct the direct URL to the .whl file on spaCy's GitHub releases
             whl_url = f"https://github.com/explosion/spacy-models/releases/download/{model_name}-{model_version}/{model_name}-{model_version}-py3-none-any.whl"
 
             response = requests.get(whl_url, stream=True)
-            response.raise_for_status() # Raise an exception for bad status codes
+            response.raise_for_status() 
 
-            # Create the directory if it doesn't exist
+            
             os.makedirs(model_dir, exist_ok=True)
 
-            # Extract the contents of the wheel file (it's a zip archive)
             with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
-                # Find the root directory of the model data within the .whl
                 model_root_in_zip = None
                 for name in zip_ref.namelist():
                     if name.startswith(f"{model_name}/") and f"{model_name}-{model_version}" in name:
-                        # Example: 'en_core_web_sm/en_core_web_sm-3.8.0/'
                         model_root_in_zip = name.split(f"{model_name}-{model_version}")[0] + f"{model_name}-{model_version}"
                         break
 
                 if model_root_in_zip:
-                    # Extract only the relevant model files to our local model_dir
                     for member in zip_ref.namelist():
                         if member.startswith(model_root_in_zip):
-                            # Construct the destination path, preserving internal directory structure
                             dest_path = os.path.join(model_dir, os.path.relpath(member, model_root_in_zip))
-                            if member.endswith('/'): # If it's a directory
+                            if member.endswith('/'): 
                                 os.makedirs(dest_path, exist_ok=True)
-                            else: # If it's a file
-                                os.makedirs(os.path.dirname(dest_path), exist_ok=True) # Ensure parent dir exists
+                            else: 
+                                os.makedirs(os.path.dirname(dest_path), exist_ok=True) 
                                 with open(dest_path, "wb") as outfile:
                                     outfile.write(zip_ref.read(member))
                     
                 else:
                     st.error(f"Error: Could not find model data within the downloaded wheel for {model_name}-{model_version}. Check the model URL and structure.")
-                    return None # Fail gracefully if model data isn't found within the wheel
+                    return None 
 
         except requests.exceptions.RequestException as e:
             st.error(f"Failed to download spaCy model from URL: {whl_url}. Error: {e}")
@@ -128,60 +113,45 @@ def load_spacy_model_from_disk():
             st.error(f"An unexpected error occurred during model download/extraction: {e}")
             return None
 
-    try:
-        # Load the model from the extracted directory
-        
+    try:        
         nlp = spacy.load(model_dir)
         return nlp
     except Exception as e:
         st.error(f"Error loading spaCy model from local directory '{model_dir}': {e}")
         return None
 
-# --- Call this new function to load the spaCy model ---
-# Make sure this line replaces your old 'nlp = load_spacy_model()' call
 nlp = load_spacy_model_from_disk()
 
-# Initialize session state for NER debug messages if not present
 if 'ner_debug_messages' not in st.session_state:
     st.session_state.ner_debug_messages = []
 
-# Import Network for pyvis (keep this here, it's fine)
 try:
     from pyvis.network import Network
 except ImportError:
     st.warning("Pyvis not found. Network graph feature will be disabled. Please install with 'pip install pyvis'")
-    Network = None # Set to None if not available
-# --- END REVISED NLTK BLOCK ---
+    Network = None 
 
-
-# Preprocessing for topic modeling and word cloud
 @st.cache_data
 def preprocess_text(text_series):
-    # Ensure all elements are strings before lowercasing
     text_series = text_series.astype(str).str.lower()
-    text_series = text_series.apply(lambda x: re.sub(r'http\S+|www\S+|https\S+', '', x, flags=re.MULTILINE)) # Remove URLs
-    text_series = text_series.apply(lambda x: re.sub(r'\S*@\S*\s?', '', x)) # Remove mentions
-    text_series = text_series.apply(lambda x: re.sub(r'#\w+', '', x)) # Remove hashtags
-    text_series = text_series.apply(lambda x: re.sub(r'[^\w\s]', '', x)) # Remove punctuation
+    text_series = text_series.apply(lambda x: re.sub(r'http\S+|www\S+|https\S+', '', x, flags=re.MULTILINE)) 
+    text_series = text_series.apply(lambda x: re.sub(r'\S*@\S*\s?', '', x)) 
+    text_series = text_series.apply(lambda x: re.sub(r'#\w+', '', x)) 
+    text_series = text_series.apply(lambda x: re.sub(r'[^\w\s]', '', x)) 
     tokens = text_series.apply(word_tokenize)
-    stop_words = set(stopwords.words('english')) # Standard NLTK stopwords
+    stop_words = set(stopwords.words('english')) 
     tokens = tokens.apply(lambda x: [word for word in x if word.isalpha() and word not in stop_words])
     return tokens
 
-# Enhanced Topic Modeling with more detailed output and NER integration
+
 @st.cache_data
-def extract_topics_enhanced(processed_texts, n_topics=5, _nlp_model=None, original_df_for_ner=None): # Renamed nlp_model to _nlp_model
-    # Clear previous debug messages
+def extract_topics_enhanced(processed_texts, n_topics=5, _nlp_model=None, original_df_for_ner=None):
     st.session_state.ner_debug_messages = []
 
-    # Ensure processed_texts is a Series of lists before attempting to join
     if not isinstance(processed_texts, pd.Series):
         st.session_state.ner_debug_messages.append("Error: Expected 'processed_texts' to be a Pandas Series in extract_topics_enhanced.")
         return [], [], None, []
 
-    # Filter out empty lists and join tokens into strings
-    # Store original indices to map back later
-    # Only keep indices where the list of tokens is not empty
     original_indices = processed_texts.index[processed_texts.apply(lambda x: bool(x))].tolist()
     texts_for_tfidf = [" ".join(tokens) for tokens in processed_texts if tokens]
 
@@ -206,14 +176,11 @@ def extract_topics_enhanced(processed_texts, n_topics=5, _nlp_model=None, origin
     nmf_model.fit(tfidf)
 
     feature_names = vectorizer.get_feature_names_out()
-    topics_list_for_return = [] # This will hold the initial topic names (NER-enhanced)
-    topic_data = [] # For the bubble chart
+    topics_list_for_return = [] 
+    topic_data = [] 
     
-    # Get document-topic distribution
     doc_topic_dist = nmf_model.transform(tfidf)
     
-    # Map documents back to their original content for NER, using the original_df_for_ner
-    # This ensures we have the full, unprocessed content for NER
     if original_df_for_ner is not None and 'content' in original_df_for_ner.columns:
         original_content_series_for_ner = original_df_for_ner.loc[original_indices, 'content'].astype(str)
     else:
@@ -222,62 +189,47 @@ def extract_topics_enhanced(processed_texts, n_topics=5, _nlp_model=None, origin
 
 
     for topic_idx, topic in enumerate(nmf_model.components_):
-        top_words_idx = topic.argsort()[:-11:-1]  # Get top 10 words
+        top_words_idx = topic.argsort()[:-11:-1]  
         top_words = [feature_names[i] for i in top_words_idx]
         top_scores = [topic[i] for i in top_words_idx]
         
-        # --- NER for Topic Naming ---
-        ner_topic_name = f"Topic {topic_idx + 1}" # Default fallback
         
-        if _nlp_model and not original_content_series_for_ner.empty: # Use _nlp_model
-            # Find documents strongly associated with this topic
-            # Lowered threshold to 0.1 to potentially include more documents for NER for generic topics
+        ner_topic_name = f"Topic {topic_idx + 1}" 
+        if _nlp_model and not original_content_series_for_ner.empty: 
             topic_doc_indices_for_ner = [original_indices[i] for i, prob in enumerate(doc_topic_dist[:, topic_idx]) if prob > 0.1] 
-            
-            # Get content for these documents
             topic_documents_content = original_content_series_for_ner.loc[topic_doc_indices_for_ner].tolist()
-
             all_entities = []
+
             if topic_documents_content:
-                # Process documents in batches if there are many for efficiency
                 for doc_content in topic_documents_content:
-                    doc = _nlp_model(doc_content) # Use _nlp_model
-                    # Filter by common entity types that make good topic names
+                    doc = _nlp_model(doc_content) 
                     all_entities.extend([ent.text for ent in doc.ents if ent.label_ in ['ORG', 'PERSON', 'GPE', 'PRODUCT', 'EVENT', 'NORP', 'LOC']])
-                
-                # Find the most common entities
                 entity_counts = Counter(all_entities)
-                # Exclude single character entities or very short common words
                 most_common_entities = [
                     entity for entity, count in entity_counts.most_common(5) 
                     if len(entity) > 2 and entity.lower() not in stop_words_nltk
                 ] 
                 
                 if most_common_entities:
-                    ner_topic_name = ", ".join(most_common_entities[:3]) # Take top 3 for conciseness
+                    ner_topic_name = ", ".join(most_common_entities[:3]) 
                 else:
-                    # Fallback if no relevant entities found by NER, enhance with top words
                     fallback_words = ", ".join(top_words[:3]) 
                     ner_topic_name = f"Topic {topic_idx + 1} ({fallback_words})"
                     st.session_state.ner_debug_messages.append(f"NER could not find relevant entities for Topic {topic_idx + 1}. Falling back to a name based on top words: ({fallback_words}). No suitable entities found or filtered out.")
             else:
-                # Fallback if no documents for NER, enhance with top words
                 fallback_words = ", ".join(top_words[:3]) 
                 ner_topic_name = f"Topic {topic_idx + 1} ({fallback_words})"
                 st.session_state.ner_debug_messages.append(f"No documents strongly associated with Topic {topic_idx + 1} for NER (threshold > 0.1). Falling back to a name based on top words: ({fallback_words}).")
         else:
-            # Fallback if _nlp_model not loaded or original content empty, enhance with top words
             fallback_words = ", ".join(top_words[:3]) 
             ner_topic_name = f"Topic {topic_idx + 1} ({fallback_words})"
             st.session_state.ner_debug_messages.append(f"spaCy model not loaded or no original content for NER for Topic {topic_idx + 1}. Using generic topic name enhanced with top words.")
 
-        # `topics_list_for_return` will now directly contain the NER-derived name or the improved fallback name.
         topics_list_for_return.append(ner_topic_name) 
         
-        # Store detailed topic data for charts
         for word, score in zip(top_words, top_scores):
             topic_data.append({
-                'topic': ner_topic_name, # Use the NER-enhanced/fallback name here for charts
+                'topic': ner_topic_name, 
                 'word': word,
                 'score': score,
                 'topic_id': topic_idx
@@ -286,94 +238,6 @@ def extract_topics_enhanced(processed_texts, n_topics=5, _nlp_model=None, origin
     return topics_list_for_return, topic_data, doc_topic_dist, original_indices
 
 
-# Generate sample data function with more realistic posting patterns
-def generate_sample_data(num_posts=1000):
-    start_date = datetime.now() - timedelta(days=365)
-    
-    # Create more realistic posting patterns with varying activity levels
-    dates = []
-    
-    # Generate dates with different patterns to simulate real social media activity
-    for i in range(num_posts):
-        # Create clusters of activity with some random variation
-        base_day = np.random.randint(0, 365)
-        
-        # Add some clustering effect - posts tend to cluster around certain periods
-        if np.random.random() < 0.3:  # 30% chance of being in a "viral" period
-            # Create clusters of posts within a few days
-            cluster_offset = np.random.randint(-3, 4)
-            base_day = max(0, min(364, base_day + cluster_offset))
-        
-        # Add some weekend/weekday patterns
-        day_of_week = (start_date + timedelta(days=base_day)).weekday()
-        if day_of_week < 5:  # Weekday - more likely to have posts
-            if np.random.random() < 0.7:  # 70% chance to keep the date
-                pass
-            else:
-                base_day = np.random.randint(0, 365)  # Random redistribution
-        
-        # Add hour variation to make it more realistic
-        hour_offset = np.random.randint(0, 24) / 24.0
-        post_date = start_date + timedelta(days=base_day + hour_offset)
-        dates.append(post_date)
-    
-    # Generate more varied content
-    content_templates = [
-        "This is amazing news about {topic}! Really excited to see this development.",
-        "Just saw the latest update on {topic}. Not sure how I feel about this...",
-        "Breaking: New developments in {topic} sector. This could change everything!",
-        "Discussing {topic} with colleagues today. Interesting perspectives shared.",
-        "My thoughts on {topic}: We need to be more careful about implementation.",
-        "Great article about {topic}. Highly recommend reading this analysis.",
-        "Concerned about the recent {topic} trends. What are your thoughts?",
-        "Celebrating progress in {topic}! This is what we've been working toward.",
-        "Quick update on {topic} - things are moving faster than expected.",
-        "Deep dive into {topic} research. The data is quite revealing."
-    ]
-    
-    topics = [
-        "artificial intelligence", "climate change", "cryptocurrency", "remote work",
-        "healthcare technology", "renewable energy", "space exploration", "education reform",
-        "digital privacy", "economic policy", "social media", "biotechnology",
-        "urban planning", "cybersecurity", "quantum computing", "sustainable agriculture"
-    ]
-    
-    contents = []
-    for i in range(num_posts):
-        template = np.random.choice(content_templates)
-        topic = np.random.choice(topics)
-        content = template.format(topic=topic)
-        contents.append(content)
-    
-    # Generate authors with some having more posts than others (realistic distribution)
-    author_weights = np.random.zipf(1.5, 99)  # Zipf distribution for realistic author activity
-    author_weights = author_weights / author_weights.sum()
-    authors = np.random.choice([f"user_{i+1}" for i in range(99)], 
-                              size=num_posts, 
-                              p=author_weights)
-    
-    # Sample subreddits with realistic distribution
-    subreddit_list = [
-        'Technology', 'Politics', 'Science', 'WorldNews', 'Futurology', 
-        'Economics', 'History', 'Environment', 'Health', 'Education',
-        'Programming', 'DataScience', 'MachineLearning', 'Cryptocurrency',
-        'ClimateChange', 'SpaceX', 'Tesla', 'Investing', 'Startups', 'Innovation'
-    ]
-    
-    # Create weighted distribution for subreddits
-    subreddit_weights = np.random.dirichlet(np.ones(len(subreddit_list)) * 2)
-    subreddits = np.random.choice(subreddit_list, size=num_posts, p=subreddit_weights)
-
-    data = {
-        'created_at': dates,
-        'content': contents,
-        'author': authors,
-        'subreddit': subreddits,
-        'media_type': np.random.choice(['twitter', 'reddit', 'forum'], num_posts)
-    }
-    return pd.DataFrame(data)
-
-# Load data
 @st.cache_data
 def load_data():
     data = []
@@ -382,7 +246,6 @@ def load_data():
             for line_num, line in enumerate(file):
                 try:
                     loaded_json = json.loads(line)
-                    # Handle cases where the actual data might be nested under a 'data' key
                     data_to_append = loaded_json.get('data', loaded_json)
                     data.append(data_to_append)
                 except json.JSONDecodeError as e:
@@ -415,7 +278,7 @@ def load_data():
 
     if 'created_at' not in df.columns or not df['created_at'].notna().any():
         st.warning("Warning: No valid timestamp column found or all NaT. Using current date as fallback for sample data.")
-        df['created_at'] = pd.to_datetime(pd.Series([datetime.now()] * len(df))) # Fallback for ALL rows if no valid date found
+        df['created_at'] = pd.to_datetime(pd.Series([datetime.now()] * len(df))) 
 
     text_cols = ['selftext', 'title', 'content', 'text', 'body', 'message', 'subreddit']
     df['content'] = ''
@@ -513,13 +376,12 @@ def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50):
         node_x.append(x)
         node_y.append(y)
         node_text.append(f"{node} (Type: {G.nodes[node]['type']}, Degree: {node_degrees[node]})")
-        # Assign colors based on node type for better visual distinction
         if G.nodes[node]['type'] == 'author':
-            node_color.append('#3498db')  # A shade of blue for authors
+            node_color.append('#3498db') 
         elif G.nodes[node]['type'] == 'subreddit':
-            node_color.append('#e74c3c')  # A shade of red for subreddits
+            node_color.append('#e74c3c') 
         else:
-            node_color.append('#95a5a6')  # Grey for other/unknown types
+            node_color.append('#95a5a6') 
         node_size_plot.append(node_sizes.get(node, 10))
         node_type.append(G.nodes[node]['type'])
 
@@ -544,9 +406,8 @@ def create_plotly_network_graph(df_for_graph, n_nodes_to_display=50):
         text=node_text,
         marker=dict(
             showscale=False,
-            # Changed colorscale to 'Viridis' for a more modern look
             colorscale='Viridis',
-            reversescale=False, # Changed to False
+            reversescale=False, 
             color=node_color,
             size=node_size_plot,
             line_width=2))
@@ -582,18 +443,15 @@ def main():
     
     st.sidebar.header("Data Configuration")
     
-    # Display spaCy load error if it occurred
     if 'spacy_load_error' in st.session_state and st.session_state.spacy_load_error:
         st.error(st.session_state.spacy_load_error)
 
     df = load_data()
 
     if df.empty or not df['created_at'].notna().any() or not df['content'].notna().any():
-        st.warning("No valid data loaded or critical columns are missing/empty. Generating sample data for demonstration.")
-        df = generate_sample_data(num_posts=1000)
-        st.success("Sample data generated successfully!")
-        st.write("Sample Data Head (generated):")
-        st.dataframe(df.head())
+        st.warning("No valid data loaded or critical columns are missing/empty. Please upload your `data.jsonl` file to proceed.")
+        st.info("Ensure your JSONL file contains 'created_at' (or similar timestamp) and 'content' (or similar text) columns.")
+        st.stop()
     
     if 'subreddit' not in df.columns:
         st.warning("'subreddit' column not found in data. Some features may be limited.")
@@ -601,15 +459,10 @@ def main():
 
     st.sidebar.header("Filter Data")
 
-    # Date Range Slider
-    # --- CORRECTED BLOCK: Uses 'created_at' directly for filtering ---
     if 'created_at' in df.columns and pd.api.types.is_datetime64_any_dtype(df['created_at']):
-        # Extract just the date part for min/max values for the slider
-        # .dt.date converts datetime to date objects (e.g., 2023-10-26 14:30:45 -> 2023-10-26)
         min_date_val = df['created_at'].dt.date.min()
         max_date_val = df['created_at'].dt.date.max()
 
-        # Convert these date objects back to datetime objects for the slider's `min_value` and `max_value` arguments
         min_date_slider = pd.to_datetime(min_date_val)
         max_date_slider = pd.to_datetime(max_date_val)
 
@@ -621,17 +474,12 @@ def main():
             format="YYYY-MM-DD"
         )
         
-        # Apply the filter using the date part of 'created_at' from the DataFrame
-        # Compare df['created_at'].dt.date (a date object) with the .date() of the slider's datetime objects
         df = df[(df['created_at'].dt.date >= date_range[0].date()) & (df['created_at'].dt.date <= date_range[1].date())]
     else:
         st.sidebar.warning("Date column ('created_at') not available or not in datetime format for filtering. Please check your data loading.")
-    # --- END CORRECTED BLOCK ---
 
-    # Initialize filtered_df immediately after df is finalized - FIXED FROM APP2
     filtered_df = df.copy()
     
-    # Date filtering logic from app2.py - FIXED
     selected_date_range = None
     if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty and filtered_df['created_at'].min() is not pd.NaT:
         min_date = filtered_df['created_at'].min().date()
@@ -645,7 +493,6 @@ def main():
                 min_value=min_date,
                 max_value=max_date
             )
-            # Ensure selected_date_range is always a tuple (start_date, end_date)
             selected_date_range = (single_date_input, single_date_input)
         
         if selected_date_range and len(selected_date_range) == 2:
@@ -661,44 +508,29 @@ def main():
         filtered_df = filtered_df[filtered_df['content'].str.lower().apply(
             lambda x: any(k in x for k in keywords)
         )].copy()
-        # ADDED: Caption for search query
-        st.info(f"Showing results for \"{search_query}\".")
+        st.info(f"You are viewing posts containing: \"{search_query}\".")
 
-    # --- REMOVED: Sentiment filter selection and application from sidebar ---
-    # sentiment_options = ['All', 'Positive', 'Neutral', 'Negative']
-    # selected_sentiment = st.sidebar.selectbox("Filter by Sentiment:", sentiment_options)
-
-    # Always perform sentiment analysis for display, but don't filter `filtered_df` by it
     if not filtered_df.empty:
         if 'sentiment_label' not in filtered_df.columns:
             with st.spinner("Performing sentiment analysis..."):
                 filtered_df['content'] = filtered_df['content'].astype(str)
-                # Apply VADER sentiment analysis
                 filtered_df['compound_score'] = filtered_df['content'].apply(lambda text: sentiment_analyzer.polarity_scores(text)['compound'])
                 
-                # Categorize sentiment based on compound score
                 filtered_df['sentiment_label'] = filtered_df['compound_score'].apply(lambda c: 
                     'Positive' if c >= 0.05 else 
                     'Negative' if c <= -0.05 else 
                     'Neutral'
                 )
-                filtered_df['sentiment_numeric_score'] = filtered_df['compound_score'] # Use compound for numeric score
+                filtered_df['sentiment_numeric_score'] = filtered_df['compound_score'] 
         
-        df_for_sentiment_charts = filtered_df.copy() # Use this copy for sentiment charts
+        df_for_sentiment_charts = filtered_df.copy() 
 
-        # --- REMOVED: Conditional sentiment filtering of filtered_df ---
-        # if selected_sentiment == 'Positive':
-        #     filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Positive'].copy()
-        # elif selected_sentiment == 'Neutral':
-        #     filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Neutral'].copy()
-        # elif selected_sentiment == 'Negative':
-        #     filtered_df = filtered_df[filtered_df['sentiment_label'] == 'Negative'].copy()
     else:
         st.info("No data to apply sentiment filter.")
 
 
-    all_subreddits_available = df['subreddit'].unique() # Use original df for all subreddits
-    selected_subreddits = st.sidebar.multiselect("Filter by Subreddit:", all_subreddits_available, default=list(all_subreddits_available)) # Default to all selected
+    all_subreddits_available = df['subreddit'].unique() 
+    selected_subreddits = st.sidebar.multiselect("Filter by Subreddit:", all_subreddits_available, default=list(all_subreddits_available)) 
     filtered_df = filtered_df[filtered_df['subreddit'].isin(selected_subreddits)].copy()
 
     st.subheader("Overview")
@@ -719,36 +551,27 @@ def main():
 
     with tab_activity:
         st.header("Post Activity Over Time")
-        with st.expander("Explanation & Conclusion for Activity Trends"):
+        with st.expander("Explanation for Activity Trends"):
             st.markdown("""
-            **Explanation:** This chart displays the volume of posts over the selected time period. Each point on the line represents the number of posts on a specific date. You can observe peaks and troughs in activity.
-
-            **Conclusion:**
-            * **Identify busy periods:** High peaks indicate periods of increased discussion or events that generated a lot of social media activity. These could correspond to news events, product launches, or campaigns.
-            * **Spot quiet times:** Low points or flat lines might suggest a lack of engagement or a period where the topic was less relevant.
-            * **Assess impact:** If your analysis aligns with a specific campaign or event, you can use this chart to gauge its immediate impact on discussion volume.
-            * **Predict future trends:** Consistent patterns over time can help in predicting future activity levels and planning engagement strategies.
+             This chart displays the volume of posts over the selected time period. Each point on the line represents the number of posts on a specific date. You can observe peaks and troughs in activity.
             """)
-        with st.spinner("Generating Activity Trends..."): # Added spinner
-            # Fixed logic from app2.py
+        with st.spinner("Generating Activity Trends..."): 
             if 'created_at' in filtered_df.columns and not filtered_df['created_at'].empty:
                 time_df = filtered_df.copy()
                 time_df['date'] = time_df['created_at'].dt.date
                 daily_counts = time_df.groupby('date').size().reset_index(name='count')
                 
-                # Create the line chart with updated colors
                 fig = px.line(daily_counts, x='date', y='count',
                               title='Post Volume Over Time',
                               labels={'date': 'Date', 'count': 'Number of Posts'},
-                              markers=True, # Added markers
-                              line_shape='spline', # Added spline interpolation
-                              hover_data={'date': True, 'count': True}, # Show date and count on hover
-                              color_discrete_sequence=px.colors.qualitative.Plotly # Changed color scheme
+                              markers=True, 
+                              line_shape='spline', 
+                              hover_data={'date': True, 'count': True}, 
+                              color_discrete_sequence=px.colors.qualitative.Plotly 
                               )
-                fig.update_traces(line=dict(width=3)) # Make line thicker
+                fig.update_traces(line=dict(width=3)) 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Key Metrics
                 st.subheader("Key Metrics")
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total Posts", len(filtered_df))
@@ -762,18 +585,11 @@ def main():
 
     with tab_sentiment:
         st.header("Sentiment Analysis")
-        with st.expander("Explanation & Conclusion for Sentiment Analysis"):
+        with st.expander("Explanation for Sentiment Analysis"):
             st.markdown("""
-            **Explanation:** This pie chart visualizes the distribution of sentiment (Positive, Neutral, Negative) across all filtered posts. The size of each slice indicates the proportion of posts falling into that sentiment category.
-
-            **Conclusion:**
-            * **Overall public perception:** Quickly understand if the prevailing sentiment around the topic is positive, negative, or neutral.
-            * **Identify sentiment shifts:** While this chart provides an aggregate view, a shift in these proportions over time (e.g., observing a sudden increase in negative sentiment after an event) can indicate a change in public perception.
-            * **Gauge brand/topic health:** A high proportion of positive sentiment is generally desirable for a brand or topic, while a high negative sentiment might signal issues that need attention.
-            * **Inform communication strategies:** If sentiment is largely negative, it might be necessary to address concerns or clarify information. If it's positive, you can leverage that for marketing or advocacy.
+            This pie chart visualizes the distribution of sentiment (Positive, Neutral, Negative) across all filtered posts. The size of each slice indicates the proportion of posts falling into that sentiment category.
             """)
-        with st.spinner("Analyzing Sentiment..."): # Added spinner
-            # Use df_for_sentiment_charts which contains sentiment labels for the full data
+        with st.spinner("Analyzing Sentiment..."): 
             if not df_for_sentiment_charts.empty and 'sentiment_label' in df_for_sentiment_charts.columns:
                 sentiment_counts = df_for_sentiment_charts['sentiment_label'].value_counts()
                 sentiment_df = pd.DataFrame({
@@ -781,25 +597,23 @@ def main():
                     'Count': sentiment_counts.values
                 })
                 
-                # Explicitly extract labels and values as lists
                 pie_labels = sentiment_df['Sentiment'].tolist()
                 pie_values = sentiment_df['Count'].tolist()
 
-                # Define colors for sentiments
-                sentiment_colors = {'Positive': '#28a745', 'Neutral': '#ffc107', 'Negative': '#dc3545'} # Green, Yellow, Red
+                sentiment_colors = {'Positive': '#28a745', 'Neutral': '#ffc107', 'Negative': '#dc3545'} 
                 pie_marker_colors = [sentiment_colors[s] for s in pie_labels]
 
                 fig = go.Figure(data=[go.Pie(
-                    labels=pie_labels, # Pass explicit list of labels
-                    values=pie_values, # Pass explicit list of values
-                    textinfo='label+percent+value', # Use Plotly's built-in textinfo
+                    labels=pie_labels, 
+                    values=pie_values, 
+                    textinfo='label+percent+value', 
                     insidetextfont=dict(color='white'),
                     hoverinfo='label+percent+value',
                     hole=.3,
-                    marker=dict(colors=pie_marker_colors) # Use custom colors
+                    marker=dict(colors=pie_marker_colors) 
                 )])
                 fig.update_layout(
-                    title_text='Overall Sentiment Distribution' # Title adjusted since filter is removed
+                    title_text='Overall Sentiment Distribution' 
                 )
                 st.plotly_chart(fig, use_container_width=True, key="sentiment_pie_chart")
 
@@ -809,22 +623,12 @@ def main():
 
     with tab_entities:
         st.header("Top Entities/Authors/Subreddits")
-        with st.expander("Explanation & Conclusion for Top Entities"):
+        with st.expander("Explanation for Top Entities"):
             st.markdown("""
-            **Explanation:** This section presents insights into the most active authors, the most discussed subreddits, and the most frequent words in the filtered dataset.
-            * **Top 10 Authors:** Identifies the users who are most prolific in posting content related to your topic.
-            * **Top 10 Subreddits:** Shows which communities (subreddits) are generating the most discussion.
-            * **Most Frequent Words:** Highlights the keywords that appear most often in the content, excluding common stopwords.
-
-            **Conclusion:**
-            * **Identify influencers/key voices:** Top authors can be influential users or active participants who are driving conversations. Engaging with them or monitoring their activity can be valuable.
-            * **Understand audience interests and platforms:** Top subreddits indicate where your target audience is discussing the topic. This can inform your content distribution strategy.
-            * **Grasp core themes and vocabulary:** Frequent words directly reflect the primary subjects and language used in the discourse, helping to understand prevailing themes and terminology.
-            * **Refine keyword strategies:** The most frequent words can help you optimize your content for searchability and relevance.
+            This section presents insights into the most active authors, the most discussed subreddits, and the most frequent words in the filtered dataset.
             """)
-        with st.spinner("Extracting Top Entities..."): # Added spinner
+        with st.spinner("Extracting Top Entities..."): 
             if not filtered_df.empty:
-                # === TOP AUTHORS (Altair Interactive Horizontal Bar Chart) ===
                 st.subheader("Top 10 Authors")
                 authors_filtered = filtered_df[filtered_df['author'] != 'Unknown User']
                 author_counts = authors_filtered['author'].value_counts().reset_index()
@@ -833,22 +637,20 @@ def main():
                 top_authors['Post Count'] = top_authors['Post Count'].astype(int)
                 
                 if not top_authors.empty:
-                    # Altair interactive horizontal bar chart with changed color scheme
                     chart_authors_alt = alt.Chart(top_authors).mark_bar().encode(
-                        x=alt.X('Post Count:Q', title='Post Count'), # Quantity type for numerical axis
-                        y=alt.Y('Author:N', title='Author', sort='-x'), # Nominal type for categorical axis, sorted by x-value
-                        tooltip=['Author', 'Post Count'], # Tooltip on hover
-                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='spectral')), # Changed color scheme
-                        text=alt.Text('Post Count:Q', format='d') # Display count on bars
+                        x=alt.X('Post Count:Q', title='Post Count'), 
+                        y=alt.Y('Author:N', title='Author', sort='-x'), 
+                        tooltip=['Author', 'Post Count'], 
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='spectral')), 
+                        text=alt.Text('Post Count:Q', format='d') 
                     ).properties(
                         title='Top 10 Authors by Post Count'
                     ).configure_axis(
-                        labelLimit=200 # Allow longer labels if needed
-                    ).interactive() # Enable interactivity like zooming and panning
+                        labelLimit=200 
+                    ).interactive() 
 
                     st.altair_chart(chart_authors_alt, use_container_width=True)
 
-                # === TOP SUBREDDITS (Altair Interactive Horizontal Bar Chart) ===
                 st.subheader("Top 10 Subreddits")
                 subreddit_counts = filtered_df['subreddit'].value_counts().reset_index()
                 subreddit_counts.columns = ['Subreddit', 'Post Count']
@@ -860,7 +662,7 @@ def main():
                         x=alt.X('Post Count:Q', title='Post Count'),
                         y=alt.Y('Subreddit:N', title='Subreddit', sort='-x'),
                         tooltip=['Subreddit', 'Post Count'],
-                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='viridis')), # Changed color scheme
+                        color=alt.Color('Post Count:Q', scale=alt.Scale(scheme='viridis')), 
                         text=alt.Text('Post Count:Q', format='d')
                     ).properties(
                         title='Top 10 Subreddits by Post Count'
@@ -870,7 +672,6 @@ def main():
 
                     st.altair_chart(chart_subreddits_alt, use_container_width=True)
 
-                # === FREQUENT WORDS (Altair Interactive Horizontal Bar Chart) ===
                 st.subheader("Most Frequent Words")
                 processed_texts = preprocess_text(filtered_df['content'])
                 all_words = [word for sublist in processed_texts for word in sublist]
@@ -882,7 +683,7 @@ def main():
                         x=alt.X('Frequency:Q', title='Frequency'),
                         y=alt.Y('Word:N', title='Word', sort='-x'),
                         tooltip=['Word', 'Frequency'],
-                        color=alt.Color('Frequency:Q', scale=alt.Scale(scheme='magma')), # Changed color scheme
+                        color=alt.Color('Frequency:Q', scale=alt.Scale(scheme='magma')), 
                         text=alt.Text('Frequency:Q', format='d')
                     ).properties(
                         title='Top 15 Most Frequent Words'
@@ -897,21 +698,15 @@ def main():
 
     with tab_wordcloud:
         st.header("Word Cloud")
-        with st.expander("Explanation & Conclusion for Word Cloud"):
+        with st.expander("Explanation for Word Cloud"):
             st.markdown("""
-            **Explanation:** A word cloud visually represents the frequency of words in the filtered content. Larger words appear more frequently, while smaller words are less common. Common English stopwords are removed.
-
-            **Conclusion:**
-            * **Quick thematic overview:** Provides an immediate visual summary of the most prominent terms and concepts being discussed.
-            * **Identify trending keywords:** Helps in quickly grasping what people are talking about the most, which can be useful for content creation or campaign messaging.
-            * **Complementary to frequent words:** While similar to the "Most Frequent Words" chart, the word cloud offers a more artistic and immediate visual impact for high-level understanding.
+             A word cloud visually represents the frequency of words in the filtered content. Larger words appear more frequently, while smaller words are less common. Common English stopwords are removed.
             """)
-        with st.spinner("Generating Word Cloud..."): # Added spinner
+        with st.spinner("Generating Word Cloud..."): 
             if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
                 processed_texts = preprocess_text(filtered_df['content'])
                 all_words = " ".join([word for sublist in processed_texts for word in sublist])
                 if all_words:
-                    # Changed background color of word cloud for better contrast with new theme
                     wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='Blues').generate(all_words)
                     plt.figure(figsize=(10, 5))
                     plt.imshow(wordcloud, interpolation='bilinear')
@@ -924,20 +719,11 @@ def main():
 
     with tab_network:
         st.header("Author Interaction Network Graph")
-        with st.expander("Explanation & Conclusion for Author Network Graph"):
+        with st.expander("Explanation for Author Network Graph"):
             st.markdown("""
-            **Explanation:** This interactive graph visualizes connections between authors and subreddits.
-            * **Blue nodes:** Represent individual authors. Larger blue nodes indicate authors with more connections (higher degree of interaction).
-            * **Red nodes:** Represent subreddits.
-            * **Edges (lines):** Connect authors to subreddits if the author has posted in that subreddit, or connect two authors if one mentioned the other.
-
-            **Conclusion:**
-            * **Identify central figures:** Authors with many connections (larger nodes) are likely key influencers or highly engaged participants in the discussions.
-            * **Discover communities and cross-posting behavior:** See which authors are active in multiple subreddits and which subreddits share common contributors.
-            * **Understand discussion flow:** Observe patterns of direct interaction (mentions) between authors, indicating direct conversations or reciprocated engagement.
-            * **Spot potential collaborations or conflicts:** Densely connected clusters might signify strong communities, while sparse connections could indicate isolated discussions.
+            This interactive graph visualizes connections between authors and subreddits.
             """)
-        with st.spinner("Building Network Graph..."): # Added spinner
+        with st.spinner("Building Network Graph..."): 
             if Network is None:
                 st.error("Pyvis library not found. Please install it (`pip install pyvis`) to enable the network graph feature.")
             else:
@@ -960,22 +746,12 @@ def main():
 
     with tab_topics:
         st.header("Topic Modeling")
-        with st.expander("Explanation & Conclusion for Topic Modeling"):
+        with st.expander("Explanation for Topic Modeling"):
             st.markdown("""
-            **Explanation:** Topic modeling identifies latent "topics" within the text data. Each topic is a collection of words that frequently appear together, suggesting a common theme.
-            * **Topic Prevalence Over Time:** Shows how the discussion volume for each identified topic changes over time.
-            * **Political Lean × Topic Heatmap:** Illustrates which topics are more or less prominent within different political communities (e.g., Liberal, Conservative, Neoliberal, Socialist, Anarchist) based on subreddit affiliations.
-            * **Top Words per Topic:** Lists the most important words for each specific topic, helping to understand its core theme.
-
-            **Conclusion:**
-            * **Uncover hidden themes:** Discover major discussion areas that might not be immediately obvious from keywords alone.
-            * **Track evolving interests:** See if certain topics are gaining or losing traction over time, allowing for timely content adjustments.
-            * **Understand audience segmentation:** The political heatmap helps in understanding how different ideological groups perceive or engage with various topics. This is crucial for targeted communication and understanding polarization.
-            * **Refine messaging:** By knowing the precise vocabulary associated with each topic, you can tailor your messaging to resonate more effectively with specific discussions.
+             Topic modeling identifies latent "topics" within the text data. Each topic is a collection of words that frequently appear together, suggesting a common theme.
             """)
-        with st.spinner("Performing Topic Modeling..."): # Added spinner
+        with st.spinner("Performing Topic Modeling..."): 
             if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
-                # Ensure 'created_at' column is datetime type
                 if 'created_at' not in filtered_df.columns or not pd.api.types.is_datetime64_any_dtype(filtered_df['created_at']):
                     st.warning("The 'created_at' column is not available or not in datetime format. Topic prevalence over time chart cannot be generated.")
                 
@@ -985,12 +761,10 @@ def main():
                 
                 n_topics = st.slider("Number of Topics", min_value=3, max_value=10, value=5, key='num_topics_slider')
                 
-                # Pass the nlp model and the original filtered_df_for_topics for NER
                 topics, topic_data, doc_topic_dist, original_indices = extract_topics_enhanced(
-                    processed_texts, n_topics=n_topics, _nlp_model=nlp, original_df_for_ner=filtered_df_for_topics # Pass _nlp_model=nlp
+                    processed_texts, n_topics=n_topics, _nlp_model=nlp, original_df_for_ner=filtered_df_for_topics 
                 )
 
-                # Display NER debug messages
                 if st.session_state.ner_debug_messages:
                     st.subheader("NER Topic Naming Debug Info")
                     for msg in st.session_state.ner_debug_messages:
@@ -1001,31 +775,27 @@ def main():
                 if topics and topic_data is not None and doc_topic_dist is not None:
                     
                     
-                    # Initialize session state for custom topic names if not already present or if number of topics changes
-                    # Use the 'topics' list returned by extract_topics_enhanced which now contains NER-derived names
                     if 'custom_topic_names' not in st.session_state or len(st.session_state.custom_topic_names) != n_topics:
-                        st.session_state.custom_topic_names = topics # topics list already contains the initial NER names
+                        st.session_state.custom_topic_names = topics 
                         
                     st.markdown("---")
                     st.subheader("Customize Topic Names")
                     st.write("Review the top words for each topic below and provide a more descriptive name if you wish. This name will appear in the charts.")
                     
-                    # Allow user to input custom names for each topic
                     current_topic_names = []
                     for i in range(n_topics):
                         topic_summary_words = [d['word'] for d in topic_data if d['topic_id'] == i][:5]
                         default_summary_text = f"Top words: {', '.join(topic_summary_words)}"
-                        st.write(default_summary_text) # Show the top words for context
+                        st.write(default_summary_text) 
                         
                         current_topic_name = st.text_input(
                             f"Name for Topic {i+1}",
-                            value=st.session_state.custom_topic_names[i], # This will now be the NER-derived name
+                            value=st.session_state.custom_topic_names[i], 
                             key=f'topic_name_input_{i}'
                         )
                         current_topic_names.append(current_topic_name)
                     st.session_state.custom_topic_names = current_topic_names
                     
-                    # Update topic_df with the custom topic labels for word importance charts
                     topic_df = pd.DataFrame(topic_data)
                     topic_df['topic_label'] = topic_df['topic_id'].apply(lambda x: st.session_state.custom_topic_names[x])
 
@@ -1078,7 +848,6 @@ def main():
                     st.subheader("🏛️ Political Subreddit Topic Distribution")
                     st.write("This analysis shows which topics are more prevalent in different political communities.")
                     
-                    # Updated political_subreddits dictionary
                     political_subreddits = {
                         'Liberal': ['liberal', 'democrats', 'progressive', 'politics', 'politicalhumor', 'marchagainsttrump'],
                         'Conservative': ['conservative', 'republican', 'conservatives', 'the_donald', 'asktrumpsupporters', 'trump'],
@@ -1205,15 +974,9 @@ def main():
             
     with tab_ai:
         st.header("AI-Generated Insights")
-        with st.expander("Explanation & Conclusion for AI-Generated Insights"):
+        with st.expander("Explanation for AI-Generated Insights"):
             st.markdown("""
-            **Explanation:** This section leverages Artificial Intelligence models to automatically analyze the filtered data and generate actionable insights. These insights are derived from patterns, trends, and anomalies detected by the AI beyond standard statistical aggregations.
-
-            **Conclusion:**
-            * **Automated discovery:** Quickly surface complex insights that might require significant manual analysis.
-            * **Identify nuanced trends:** AI can detect subtle relationships or emerging patterns in the data that are not immediately visible in basic charts.
-            * **Enhance decision-making:** Use these high-level insights to inform strategic decisions, marketing campaigns, content creation, or public relations efforts.
-            * **Efficiency:** Automates a part of the analysis process, saving time and resources.
+             This section leverages Artificial Intelligence models to automatically analyze the filtered data and generate actionable insights. These insights are derived from patterns, trends, and anomalies detected by the AI beyond standard statistical aggregations.
             """)
         
         if not filtered_df.empty:
@@ -1231,8 +994,6 @@ def main():
         st.markdown("---")
         st.subheader("🤖 OpenAI-Powered Insights")
         
-        # NOTE: OpenAI API key is hardcoded here for demonstration.
-        # In a production app, use st.secrets or environment variables.
         openai_api_key = st.secrets.get("OPENAI_API_KEY")
         
         if openai_api_key:
