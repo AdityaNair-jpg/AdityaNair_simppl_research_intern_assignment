@@ -702,16 +702,28 @@ def main():
             st.markdown("""
              A word cloud visually represents the frequency of words in the filtered content. Larger words appear more frequently, while smaller words are less common. Common English stopwords are removed.
             """)
-        with st.spinner("Generating Word Cloud..."): 
+        with st.spinner("Generating Word Cloud..."):
             if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
                 processed_texts = preprocess_text(filtered_df['content'])
                 all_words = " ".join([word for sublist in processed_texts for word in sublist])
-                if all_words:
-                    wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='gnuplot').generate(all_words)
-                    plt.figure(figsize=(10, 5))
-                    plt.imshow(wordcloud, interpolation='bilinear')
-                    plt.axis('off')
-                    st.pyplot(plt)
+
+                if all_words and len(all_words.strip()) > 0:
+                    try:
+                        wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='gnuplot').generate(all_words)
+
+                        # Check if the wordcloud actually has words rendered
+                        if wordcloud.words_: # This checks if the generated wordcloud object contains any words
+                            plt.figure(figsize=(10, 5))
+                            plt.imshow(wordcloud, interpolation='bilinear')
+                            plt.axis('off')
+                            st.pyplot(plt)
+                            plt.clf() # Clear the current figure to prevent issues in subsequent runs
+                        else:
+                            st.warning("Word cloud generated, but it appears empty. This might be due to extreme filtering, very short/repetitive text, or all words being common stopwords.")
+                            plt.clf() # Clear the figure even if empty, to be safe
+                    except Exception as e:
+                        st.error(f"An unexpected error occurred during Word Cloud generation: {e}")
+                        plt.clf() # Clear the figure on error
                 else:
                     st.warning("No meaningful words to generate word cloud after preprocessing and filters.")
             else:
