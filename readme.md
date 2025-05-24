@@ -99,6 +99,8 @@ Example:
 
 ---
 
-## 📄 License
+![image](https://github.com/user-attachments/assets/d5d0c6f5-425f-4ae3-a248-661172ab6412)
+![image](https://github.com/user-attachments/assets/2fc44a31-d6e5-49b0-93c1-14c2501be1f3)
+![image](https://github.com/user-attachments/assets/e34a9422-b891-4575-9586-dfadf6598a38)
 
-This project is open-source and available under the [MIT License](LICENSE).
+
