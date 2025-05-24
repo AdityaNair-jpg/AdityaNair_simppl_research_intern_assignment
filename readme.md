@@ -17,26 +17,6 @@ A powerful, interactive web-based dashboard for analyzing social media data. Bui
 
 ---
 
-## 🖼️ System Architecture
-
-```mermaid
-graph TD
-    A[User Interface (Streamlit Web App)] --> B[Data Loading]
-    B --> C[Text Preprocessing]
-    C --> D[Sentiment Analysis (VADER)]
-    C --> E[NER (spaCy)]
-    C --> F[Topic Modeling (TF-IDF + NMF)]
-    B --> G[Activity Trends Visualization]
-    B --> H[Word Frequency & Wordcloud]
-    B --> I[Author/Subreddit Extraction]
-    I --> J[Network Graph Generation (NetworkX + Plotly)]
-    F --> K[Topic Visualizations]
-    B --> L[AI Insights (OpenAI GPT, Optional)]
-    style L stroke:#f66,stroke-width:2px
-```
-
----
-
 ## 📦 Installation
 
 1. Clone the repo:
@@ -49,8 +29,6 @@ cd social-media-dashboard
 2. Create a virtual environment and install dependencies:
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # on Windows use `venv\Scripts\activate`
 pip install -r requirements.txt
 ```
 
