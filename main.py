@@ -702,16 +702,21 @@ def main():
             st.markdown("""
              A word cloud visually represents the frequency of words in the filtered content. Larger words appear more frequently, while smaller words are less common. Common English stopwords are removed.
             """)
-        with st.spinner("Generating Word Cloud..."): 
+        with st.spinner("Generating Word Cloud..."):
             if not filtered_df.empty and 'content' in filtered_df.columns and not filtered_df['content'].empty:
                 processed_texts = preprocess_text(filtered_df['content'])
+                # Join processed tokens back into a single string
                 all_words = " ".join([word for sublist in processed_texts for word in sublist])
-                if all_words:
+
+                # Add a check for meaningful words
+                if all_words and len(all_words.strip()) > 0: # Ensure it's not just whitespace
                     wordcloud = WordCloud(width=800, height=400, background_color='black', colormap='gnuplot').generate(all_words)
                     plt.figure(figsize=(10, 5))
                     plt.imshow(wordcloud, interpolation='bilinear')
                     plt.axis('off')
                     st.pyplot(plt)
+                    # Clear the current figure to prevent issues in subsequent runs
+                    plt.clf() # Add this line
                 else:
                     st.warning("No meaningful words to generate word cloud after preprocessing and filters.")
             else:
